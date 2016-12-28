@@ -1,0 +1,13 @@
+* Source Documents for Published Papers
+** Smoothed Bootstrap Aggregation for Assessing Selection Pressure at Amino Acid Sites [1]
+   Dependencies:
+  - BSD or GNU make
+  - LaTeX and latexmk
+  - R
+  - R libraries
+    - ggplot2
+    - grid
+    - gtable
+    - kntir
+
+[1] Mingrone, Joseph, Edward Susko, and Joseph Bielawski.  "Smoothed Bootstrap Aggregation for Assessing Selection Pressure at Amino Acid Sites."  Molecular Biology and Evolution 33.11 (2016): 2976-2989.

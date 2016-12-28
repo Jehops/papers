@@ -1,0 +1,2561 @@
+\documentclass[12pt,letterpaper]{article}
+
+\usepackage{amsmath}
+\usepackage{bm} % for bold math symbols
+\usepackage{booktabs} % better tables
+\usepackage[left=1in,right=1in,top=1in,bottom=1in]{geometry} % margins
+% for subfigures (requires caption, breaks knitr w/o subfloat defined below)
+\usepackage{caption,subcaption}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{latexsym} % MBE template for some fonts
+\usepackage{lineno} % line numbers
+\usepackage{mathtools} % an extension to amsmath to fix bugs
+\usepackage{multirow} % column cells that span multiple rows
+\usepackage{natbib} % nicer references
+\usepackage{paralist} % inline lists
+\usepackage{rotating} % for landscape tables
+\usepackage{setspace} % for line spacing
+% need subfloat b/c knitr's fig.subcap was built with deprecated subfig package
+\newcommand{\subfloat}[2][need a sub-caption]{\subcaptionbox{#1}{#2}}
+\usepackage[flushleft]{threeparttable} % description under table
+\usepackage{tikz}
+\usepackage{tikz-qtree}
+\usepackage[noindentafter,tiny]{titlesec}
+\titleformat{\subsection}{\itshape\small\bfseries}{\thesubsection}{1em}{}
+\titlespacing{\section}{0pt}{6pt}{6pt}
+\titlespacing{\subsection}{0pt}{5pt}{5pt}
+\usepackage{verbatim} % comments
+
+
+\usetikzlibrary{arrows}
+
+%\normalem % stop ulem from turning italics into underlines
+
+% specialcell is for line breaks in table cells
+\newcommand{\specialcell}[2][c]{\begin{tabular}[#1]{@{}c@{}}#2\end{tabular}}
+
+% comments italicized and red
+\newcommand{\cmt}[1]{\textit{{\color{red}#1}}}
+
+% page heading title
+\pagestyle{myheadings}\markright{SBA for Assessing Selection Pressure at Amino Acid Sites}
+\renewcommand{\baselinestretch}{2}
+
+\renewcommand{\figurename}{Fig.}
+
+\begin{document}
+
+<<setup,include=F>>=
+library(ggplot2)
+library(grid)
+library(gtable)
+library(knitr)
+opts_chunk$set(fig.path='figures/',fig.align='center',fig.show='hold',cache=T,autodep=T) #$
+options(formatR.arrow=TRUE,width=90)
+#setwd("add_path_here")
+@
+
+\begin{flushright}Article - Methods\end{flushright}
+
+\singlespacing
+
+\noindent \textbf{\large Smoothed Bootstrap Aggregation for Assessing Selection Pressure at Amino Acid Sites}
+\vskip 4mm
+\noindent {\small Joseph Mingrone,$^{*,2,3}$ Edward Susko,$^{2,3}$ Joseph Bielawski$^{1,2,3}$}\\
+\textit{\scriptsize $^1$Department of Biology, Dalhousie University, Halifax, NS, Canada\\
+$^2$Department of Mathematics and Statistics,Dalhousie University, Halifax, NS, Canada\\
+$^3$Centre for Comparative Genomics and Evolutionary Bioinformatics, Dalhousie University, Halifax, NS, Canada\\
+\textbf{*Corresponding Author:} E-mail: jrm@mathstat.dal.ca}
+
+\begin{abstract}
+To detect positive selection at individual amino acid sites, most methods use an empirical Bayes approach.  After parameters of a Markov process of codon evolution are estimated via maximum likelihood, they are passed to Bayes formula to compute the posterior probability that a site evolved under positive selection.  A difficulty with this approach is that parameter estimates with large errors can negatively impact Bayesian classification.  By assigning priors to some parameters, Bayes Empirical Bayes (BEB) mitigates this problem.  However, as implemented, it imposes uniform priors, which causes it to be overly conservative in some cases.  When standard regularity conditions are not met and parameter estimates are unstable, inference, even under BEB, can be negatively impacted.  We present an alternative to BEB called smoothed bootstrap aggregation (SBA), which bootstraps site patterns from an alignment of protein coding DNA sequences to accommodate the uncertainty in the parameter estimates.  We show that deriving the correction for parameter uncertainty from the data in hand, in combination with kernel smoothing techniques, improves site specific inference of positive selection.  We compare BEB to SBA by simulation and real data analysis.  Simulation results show that SBA balances accuracy and power at least as well as BEB, and when parameter estimates are unstable, the performance gap between BEB and SBA can widen in favour of SBA.  SBA is applicable to a wide variety of other inference problems in molecular evolution.
+\end{abstract}
+
+\onehalfspacing
+
+\noindent Key words: adaptive evolution, positive selection, codon models, bootstrap, kernel smoothing, Bayes empirical Bayes
+
+\section*{Introduction}
+Identifying positively selected amino acid sites is a challenging statistical task that is important for investigating the functional consequences of molecular change \citep{yang2005power}.  Several approaches have been developed to detect positive selection within a protein \citep[reviewed in][]{pond2005not,anisimova2009investigating}, but their reliability varies according to the properties of the data in hand.  The most widely used methods employ a codon model to detect an excess in the rate of nonsynonymous substitutions relative to synonymous substitutions ($dN/dS = \omega > 1$), which is an indication of evolution by positive selection.  Proteins evolving under positive selection must retain the capacity to fold into complex structural and functional domains, so the majority of amino acid substitutions will be subject to purifying selection pressure, with $\omega < 1$ \citep{kimura1968evolutionary}.  From extensive surveys of positive selection in real genes, we expect that only a small fraction of amino acid sites will be subject to adaptive change and exhibit an $\omega > 1$ \citep[e.g., ][]{anisimova2007phylogenomic,ge2008protein}.  The sparseness of these sites makes them challenging to identify.
+
+Two general categories of methods for detecting positively selected amino acid sites include counting and fixed-effect methods.  Counting methods employ ancestral reconstruction of codon states for all internal nodes of a phylogenetic tree to obtain counts of the synonymous and nonsynonymous changes along each of its branches.  The counts inferred for a given site are used to test if $\omega \neq 1$.  Some counting methods use parsimony \citep{fitch1997long,bush1999positive,suzuki1999method}, and others likelihood \citep{suzuki2004new,nielsen2002mapping,nielsen2002detecting,suzuki2004false,pond2005not} to infer the ancestral codon states.  The reconstructions are often similar, but under the likelihood approach uncertainty about the inference can be summarized via the posterior probabilities of the ancestral states.  Thus, the parsimony based methods must assume that these uncertainties are irrelevant to the statistical test.  While this makes the approach attractive for very large datasets where reliable reconstructions can be obtained relatively quickly \citep{lemey2012counting}, widespread use is hindered by a lack of power when the level of divergence is too low or by the negative impact of substitutional saturation when the level of divergence is too high \citep{pond2005not}.
+
+An alternative approach is to treat each site as independently relevant to the question of evolution by positive selection, and attempt to fit an $\omega$ parameter to the data at each site.  Thus, the effect of each site on the task of $\omega$ inference is fixed.  Model based testing for $\omega \neq 1$ can be carried out via a standard likelihood ratio test (LR), and no assumptions are required about the distribution of selection pressure, $\omega$.  Although $\omega$ is treated as a site-specific variable, other important variables in the codon model (e.g., branch lengths) are shared among sites, with their values estimated jointly from the complete set of sites.  Results obtained by using these modelling ideas \citep{pond2005not, massingham2005detecting} are encouraging, and we expect this family of methods will continue to have a role in real data analyses \citep{scheffler2014validity}.  However, $\chi^2$ approximations to the distribution of the test statistic assume relatively large numbers of taxa, which is often not the case.  The lack of independence of data across taxa that is due to phylogeny creates further difficulties for $\chi^2$ approximations.
+
+A third approach for detecting positive selection at amino acid sites, which is the focus of this article, treats the value of \(\omega\) at a site as the realized value of a random variable.  A particular model for the distribution of \(\omega\) is chosen and maximum likelihood (ML) is used to fit the distribution to the data as part of an explicit model of codon evolution.  There are recommendations \citep[e.g.,][]{yang1998synonymous} to use a pre-screen that fits two models: one with a distribution that excludes values of \(\omega>1\), and another with the same distribution, except with weight on values of \(\omega>1\) permitted.  This nested-model pre-screening is used to test if the data conveys any evidence of positive selection.  When the null hypothesis of no positive selection is rejected using a LR test, site-wise analysis is warranted.  Site-wise analysis is carried out using Bayes rule to calculate the posterior probability that a site \(h\) evolved under some estimated value of \(\omega\), given the data at site \(h\).  This approach is referred to as empirical Bayes (EB) because the marginal distribution of \(\omega\) is determined from the data.  Conclusions regarding the evolution at a site are made based on the estimated \(\omega\)-values along with their associated posterior probabilities conditioned on the data at the site.  For example, when the largest posterior probability for a site is associated with a value of \(\omega>1\), this is taken as evidence of positive selection at that site.
+
+Because the marginal distribution of $\omega$ is determined from the data %, and $Pr(\omega^{(h)}>1|x_h)$
+and the site posterior probabilities always depend on the fitted values of the model parameters (shape parameters of the distribution, edge lengths, etc.), the reliability of EB inference depends on the accuracy of the fitted values.  If they have been accurately estimated, as is often the case with large, information-rich datasets, they can simply be treated as known without errors.  This approach is known as the na\"{i}ve empirical Bayes approach (NEB) \citep{nielsen1998likelihood}.  However, when the fitted values are subject to large errors, the detection of positive selection according to %%$Pr(\omega^{(h)}>1|x_h)$
+the posterior probabilities can be negatively impacted and in some cases the false positive rate can be unacceptably high \citep{wong2004accuracy}.  Bayes empirical Bayes (BEB), has been used to adjust for uncertainty in the parameters of the $\omega$ distribution by assigning priors to those parameters and using numerical integration to average over the uncertainty represented by the priors \citep{yang2005bayes}.  Because this tactic can substantially reduce the false positive rate relative to NEB in problematic datasets, BEB has become a popular method for inferring the action of selection at individual sites.  A fully Bayesian approach that also assigns priors to edge-lengths and other parameters is available for the inference of positive selection at sites \citep{aris2003bayes, huelsenbeck2004bayesian}, but it is not as widely employed as EB because it is available for a limited set of models.
+
+BEB does have limitations.  As currently implemented, the BEB approach only accommodates uncertainty in the parameters of the $\omega$ distribution, leaving all others fixed to their fitted values.  Furthermore, only uniform priors are used, which means the adjustment for uncertainty is independent of the signal in the data.  Although these will not be serious limitations for many analyses of real data, we show through simulation and real data analysis that deriving the adjustment for parameter uncertainty from the data can improve inference for some datasets.  To avoid the need for priors, we developed a new approach that uses bootstrapping \citep{efron1979bootstrap,efron1982jackknife} of site patterns to simulate dataset variability and adjust for the uncertainty in the data.  From bootstrap datasets, the distribution of the maximum likelihood estimates (MLEs) can be estimated.  The posterior probabilities %%$\omega^{(h)}>1|x_h$
+for positive selection at a site is then obtained using an aggregate value coming from MLEs over bootstrapped data sets, rather than according to a single posterior probability obtained under NEB or BEB.  In principle, bootstrap-based methods should use as many replicates as possible to approximate the infinite-sample bootstrap distribution.  As this is computationally expensive, we use smoothing techniques borrowed from kernel density estimation \citep[Section 3.4]{silverman1987bootstrap,davison1997bootstrap} to obtain an approximation with less computational cost.  We refer to this new approach as smoothed bootstrap aggregation (SBA).  Our simulation results show that SBA balances accuracy and power at least as well as BEB.
+
+We also investigated the behaviour of ML estimation when standard regularity conditions, such as the requirement for true parameter values to be in the interior of the parameter space, are not met.
+Codon models fit $\omega$ distributions that, for some data-generating settings, violate regularity conditions, which leads to substantial instability in parameter estimation.  These instabilities have a negative impact on the inference of positive selection under EB, and we show that our new approach is an improvement over both NEB and BEB in such cases.  We also show that results previously reported for the \textit{tax} gene of HTLV \citep{suzuki2004false} are likely a consequence of such instabilities.  The \textit{tax} gene is a well known example where EB is widely considered unreliable, and it has been used to criticize the overall approach.  We provide an explanation for the previous results obtained under EB methods for the \textit{tax} gene, and show that SBA can help diagnose such dubious inferences.
+
+\section*{New Approaches}
+We developed a new approach for classifying sites we call smoothed bootstrap aggregation (SBA).  SBA uses bootstrapping and kernel smoothing techniques to accommodate uncertainties in MLEs.  Site patterns from a sequence alignment are sampled with replacement to create a number of bootstrap sequence alignments.  For each of the bootstrap sequence alignments, MLEs are calculated.  The usual bootstrap distribution is the empirical distribution of the calculated MLEs.  To avoid difficulties due to 1) low information content in the data, 2) necessarily limited bootstrap sampling and 3) instabilities in the parameter estimates, we used, instead, a kernel density estimate of the bootstrap distribution coming from the MLEs.  The smoothness of the distribution is controlled by a bandwidth parameter, which we set larger than conventional values to give greater smoothing.
+
+While typical applications of bootstrapping use MLEs to calculate confidence intervals and standard errors, we, instead, use the bootstrap to accommodate uncertainty in the posterior probabilities of positive selection at sites.  For any given site in the original sequence alignment, many parameter values are generated from the smoothed bootstrap distribution and substituted into posterior probability formulas to give a distribution of posterior probabilities which reflects parameter uncertainty.  The mean or median of these posteriors is a more stable estimate of the true posterior and is used for classification.  See figure \ref{fig:bootstrap} for an overview of SBA.
+
+\section*{Results}
+\subsection*{Non-standard ML estimation behaviour}
+Parameter estimation by ML has attractive statistical properties, including consistency, efficiency and asymptotic normality, when certain regularity conditions hold \citep{kalbfleisch1985probability,bickel2015mathematical}.  For settings where regularity conditions hold, we verified that we could obtain well-behaved estimates of the parameters of the $\omega$ distribution under two commonly used codon models: M2a \citep{nielsen1998likelihood,yang2005bayes} and M8 \citep{yang2000codon}.  We simulated 100 datasets representing a \textit{regular} estimation problem with an $\omega$ distribution having at least $10\%$ weight on each site class ($45\%$ $\omega=0$, $45\%$ $\omega=0.5$, and $10\%$ $\omega=5$). As expected, MLEs obtained from these data under both M2a and M8 have unimodal and symmetric distributions (fig. \ref{fig:mle_hists}\subref{sfig:sim_M2a_easy},\subref{sfig:sim_M8_easy}).  For the estimates in this \textit{regular} case, there are no indications of departures from the limiting properties predicted by ML theory.
+
+The regularity condition requiring true parameter values to be in the interior of the parameter space is sometimes violated when using codon models.  For such parameter settings, instabilities or departures from the expected limiting properties of ML estimation can arise including non-Gaussian and over-dispersed distributions of estimates.  To investigate instabilities under models M2a and M8, we simulated 100 datasets representing an \emph{irregular} estimation problem with sparse information, i.e., $100\%$ of the sites at the threshold for positive selection, $\omega=1$.  In figure \ref{fig:mle_hists}\subref{sfig:sim_M2a_diff},\subref{sfig:sim_M8_diff}, in contrast to the results presented in figure \ref{fig:mle_hists}\subref{sfig:sim_M2a_easy},\subref{sfig:sim_M8_easy}, there are instabilities in the MLEs for the parameters representing the proportion of sites under positive selection, $p_{\omega>1}$.  The $p_{\omega>1}$ parameter distributions under both models have mass concentrated on both the lower and upper boundaries of the parameter space, and the distributions of the corresponding $\omega_{>1}$ parameters are concentrated on the lower boundary.  Application of the LR test to filter datasets that convey no evidence of positive selection did not prevent instabilities.  The null hypothesis of no positive selection was rejected for 10 datasets under M2a and 9 under M8, however, the MLE distributions after applying this pre-screening step remained unstable (supplementary fig. \ref{fig:hists-cat1-scheme1-filter}).
+
+Some of the model M2a MLE instabilities shown in figure \ref{fig:mle_hists}\subref{sfig:sim_M2a_diff},\subref{sfig:sim_M8_diff} are due to the discrete $\omega$ distribution.  True discrete distributions of interest can lie on the boundary of the parameter space, which is a regularity condition violation that gives rise to MLE instabilities.  For instance, consider data generated from an $\omega$ distribution with no mass on $\omega>1$.  Estimates of the $\omega$ distribution will tend to approximate the true distribution and one way this can occur under M2a is when $\hat\omega_{>1} \approx 1$.  When this happens, the likelihood will remain approximately constant over all choices of $p_{\omega=1}$ and $p_{\omega>1}$, giving a sum, $p_{\omega>1}+p_{\omega=1}$, that is approximately the same as that of the MLE.  Consequently, estimates of $p_{\omega=1} + p_{\omega>1}$ are stable, but estimates of $p_{\omega=1}$ and $p_{\omega>1}$ are not, because many different choices give the same sum.  Likewise, when a $p_{\omega>1}$ parameter is estimated near 0, the corresponding $\omega_{>1}$ can take on almost any value without changing the likelihood.  For example, two M2a and six M8 biologically unrealistic estimates of the $\omega_{>1}$ parameter (e.g. $\omega_{>1}=999$) occurred when the corresponding $p_{\omega>1}$ parameters were estimated to be 0.  These estimates were excluded from the $\omega_{>1}$ histograms.  For the data representing an \textit{irregular} estimation problem with all sites simulated with $\omega=1$, two other problematic M2a parameterizations that fit the data equally well occurred often.  First, all the weight was put on the $w_1$ category and second, all the weight was put on the $w_{>1}$ category when it was estimated very close to 1. Although there is virtually no difference in the likelihood scores between the two parameterizations, the NEB posterior probabilities for positive selection were 0 and 1 respectively.  These different MLE instabilities arose with two general types of simulation settings: 1) when fewer site classes were simulated than exist in the fitted model, and 2) when different site classes were simulated with similar levels of selection pressure.
+
+When working with real data, often only a single sample is available and alternative techniques must be used to approximate distributions of parameter estimates.  One such technique is the bootstrap.  We used our bootstrap-based approach with sequence alignments to investigate properties of the MLE distributions and to detect settings where inference tends to be problematic (see Methods).  While sampling with replacement from a single sample leads to a bootstrap parameter distribution that is a jagged estimate of a smooth distribution, we found the bootstrap, in many cases, can effectively estimate the distributions of MLEs.  Figure \ref{fig:mle_hists}\subref{sfig:bs_M2a_easy},\subref{sfig:bs_M8_easy} shows the distribution of the $\omega$ MLEs associated with positive selection generated over 100 bootstrap samples of a \textit{regular} dataset.  Note the resemblance of the bootstrap distributions in figure \ref{fig:mle_hists}\subref{sfig:bs_M2a_easy},\subref{sfig:bs_M8_easy} to the analogous distributions over simulated datasets in figure \ref{fig:mle_hists}\subref{sfig:sim_M2a_easy},\subref{sfig:sim_M8_easy}.  A comparison of figures \ref{fig:mle_hists}\subref{sfig:sim_M2a_diff},\subref{sfig:sim_M8_diff} and \ref{fig:mle_hists}\subref{sfig:bs_M2a_diff},\subref{sfig:bs_M8_diff} illustrates that when the distribution over multiple samples is problematic, so too is the distribution over bootstrap samples.  Among the 100 bootstrap MLE distributions obtained from the datasets simulated under \textit{irregular} model conditions, we identified 91 of the M2a and 95 of the M8 $p_{\omega>1}$ parameter distributions as unstable using the criterion that at least 5\% mass lies both below 0.2 and above 0.8.  These distributions indicate that the mixture distribution for $\omega$ ``flip-flops'' between few and many sites in a positive selection class.  Recall that under the generating model for these data, no sites are under positive selection.  Plots of the other parameters of the $\omega$ distributions can be found in supplementary figure \ref{fig:mle_p0_p1_w0_hists}.
+Scenarios when the bootstrap distribution is not a good estimate of the true distribution of parameter estimates has been described in other settings, e.g., \citet[p. 81]{efron1994introduction}.
+So, while the bootstrap alone can be helpful for identifying problems, it is not always a robust solution for deriving a correction for parameter uncertainty.
+
+\subsection*{Kernel smoothing improves the bootstrap-based method for approximating MLE distributions}
+To avoid results that are a consequence of randomness due to bootstrapping, it is beneficial to choose the number of bootstrap samples, $B$, large enough so that the finite-sample bootstrap distribution approximates the infinite-sample bootstrap distribution well.  However, when regularity conditions are violated there is no guarantee that even the infinite-bootstrap distribution provides an adequate assessment of the variability of an MLE.  We tested this assertion under codon models where the distributions of the $p_{\omega>1}$ parameters were unstable over simulated and bootstrap datasets.  For the data representing \textit{irregular} model conditions described above, we generated 10,000 bootstrap datasets for each of the first 10 simulated datasets. The instabilities that characterize these 10 bootstrap distributions were largely unchanged by increasing $B$ (supplementary fig. \ref{fig:hists-cat1-scheme1-more-bs}).  Similar difficulties arise in a variety of bootstrap applications.  As a simple example of the phenomenon, suppose interest is in $\theta$ from a binomial distribution with small $n$ and small $\theta$.  It is possible to sample almost all zeros, in which case the variance of the bootstrap distribution of $\theta$ estimates will be too small.  Such boundary issues related to small samples can similarly be problematic for $\omega$ distributions when estimated weights are close to 0.
+
+We used kernel smoothing along with bootstrapping to characterize the uncertainty in MLEs under \emph{difficult} estimation conditions.
+Kernel smoothing is typically used to approximate the infinite-sample distribution more effectively when using a smaller number of bootstrap samples.  However, the standard application of this technique \citep[p. 79]{davison1997bootstrap} was not sufficient when the MLEs were unstable.  For such cases, \textit{over smoothing} (i.e., using a larger than typically considered optimal bandwidth) was necessary to obtain conservative estimates of the MLE distributions, with larger variance, that suppressed the influence of the instabilities (supplementary fig. \ref{fig:before-after-smoothing}).  By over-smoothing the $p$ parameters of codon models M2a and M8 with a uniform kernel we compensated for 1) low information content in the data, 2) fewer bootstrap samples, and 3) instabilities in the parameter estimates.  For this reason we included over-smoothing of the $p$ parameters in all applications of SBA.
+
+\subsection*{Simulation Results}
+We used simulation to compare the performance of SBA with BEB and NEB.  The design of our studies was motivated by the more challenging schemes of \citet{wong2004accuracy} and \citet{yang2005bayes}, however our design extends theirs to investigate performance under progressively more model misspecification.  The design is divided into three scenarios covering three levels of model misspecification.  The \textit{Correct Model Scenario} is comprised of four simulation studies (studies $1$-$4$) where the nuisance parameters of the generating model ($\kappa=1$, $\pi_i=1/61$) were freely estimated by the fitted model.  The $\omega$ distributions used to generate the datasets are listed in the third column of table \ref{tab:sim}.
+This scenario design matches selected schemes in \citet{yang2005bayes}.  The \textit{Mild Misspecification Scenario} uses the same $\omega$ distribution as the first scenario as the basis of four additional studies (studies $5$-$8$), but includes mild misspecification of the nuisance parameters (see Methods).  Lastly, the \textit{Heavy Misspecification Scenario}, includes two studies (studies $9$-$10$) with heavy misspecification for the fitted model, which represents a more plausible scenario for the analysis of real sequences.  In one study (study 9) the data were simulated using the highly biased codon frequencies from the Drosophila \textit{GstD1} gene \citep{bielawski2005maximum}.  In the second study (study 10), the generating model is based on a 50/50 mixture of two heterogeneous classes of sites.  One class was generated using equal codon frequencies, $\kappa=1$, and $\omega=0.5$, while the other used the Drosophila \textit{GstD1} gene codon frequencies, $\kappa=8$, and $\omega=1$.  For all 10 simulation studies we simulated 100 alignments, each having 500 codons, using the same 5-taxon tree from \citet{wong2004accuracy}.  The studies in the \textit{Correct Model Scenario} were repeated under model M2a with the 30-taxon tree from the same paper.
+
+Table \ref{tab:sim} lists the false positive rates (proportion of sites inferred positively selected among those that are not) using a posterior probability cutoff of $0.95$ for NEB, BEB, and SBA under models M2A and M8.  Study 1 (no misspecification of the nuisance parameters and all sites simulated using $\omega=1$) is an interesting case as NEB exhibits false positives, while BEB and SBA do not.  This is expected; NEB is known to yield unreliable posterior probability calculations in small datasets \citep[e.g., ][]{anisimova2002accuracy,yang2005bayes}.  Because the conditions of study 1 yield unstable parameter estimates (fig. \ref{fig:mle_hists}\subref{sfig:sim_M2a_diff}-\subref{sfig:bs_M8_diff}), the false positives under NEB reflect more than mere sampling errors.  MLE instabilities cause large $p_{\omega>1}$ to occur too often and these values lead to high posterior probabilities for positive selection under M2a and M8. The posterior probability calculations under SBA and BEB are reliable because those approaches do not assume the MLEs have been estimated without error.  \citet{yang2005bayes} suggests that with more data, the problems with NEB controlling false positives can be mitigated.  However, the MLE instabilities persisted in study 1 using a tree topology with 30 taxa (supplementary fig. \ref{fig:sim_M2a_diff_30_taxa}), indicating that large sample sizes do not always ensure accurate predictions.
+
+Relative to simulations with a single $\omega=1$ (study 1), when the $\omega$ distribution was 50\% $\omega=0.5$ and 50\% $\omega=1$ (study 2), the overall signal for positive selection was diminished and all false positive rates were $0$. Conversely, when the $\omega$ distribution was 50\% $\omega=1$ and 50\% $\omega=1.5$ (study 3) there was a slight increase in the NEB false positive rates relative to study 1. Under M2a the false positive rates were $0$ using BEB and SBA, but under M8 they increased to $0.05$ using BEB and to $0.02$ using SBA.  For study 4, because the simulated $\omega$ values for the three sites classes were far enough apart, the false positive rates were well controlled.
+
+The introduction of mild model misspecification of the nuisance parameters did not result in higher false positive rates under M2a, but did under M8.  For studies $5$-$8$, the BEB false positive rates (using a $0.95$ posterior probability threshold) under M8 increased in all four cases relative to the corresponding studies ($1$-$4$) in the \textit{Correct Model Scenario}.  The same SBA false positive rates only increased in two cases and by smaller amounts than with BEB.  When heavy model misspecification was introduced in the third scenario, NEB failed to adequately control false positives with rates between 50 and 71\% under both M2a and M8.  BEB and SBA also did not control the false positive rates in study 9, but did in study 10.
+
+The results in table \ref{tab:sim} are over all sites in all simulated datasets.  After applying LR tests at the 0.05 level to filter datasets that convey no evidence of positive selection, none of the false positive rates under BEB or SBA changed.  Supplementary table \ref{tab:simlrt} gives the false positive rates under NEB after the adjustment.  With the exception of two cases, the effect is minimal.  Interestingly, under the null hypothesis, the false positive rates of the LR tests were larger than expected, particularly with model misspecification.
+
+When testing for positive selection, we aim for large true positive rates, the proportion of sites truly under positive selection that are correctly identified, sometimes referred to as power.  A difficulty in comparing methods for detecting positive selection is the choice of threshold.  Lower thresholds tend to increase the true positive rate, but tend to also increase the false positive rate.  To ensure that comparisons of power for different methods correspond to the same false positive rate we used Receiver Operator Characteristic (ROC) curves, a convenient way to visualize the balance between accuracy and power for classification problems.  Each point on a curve represents a threshold for the posterior probability of positive selection.  Figure \ref{fig:roc} shows ROC curves for each of the simulations that included positive selection in the generating model (studies 3, 4, 7, and 8).  Curves are also included for the classification of sites using the generating parameters, i.e., the MLEs are fixed to the simulated values.  These curves represent an expected upper limit in performance of site classification (supplementary file S1).  The lower limit for classification, when each site is randomly identified to be under positive selection, is represented by a $y=x$ line.
+
+The introduction of mild misspecification made the task of detecting sites under positive selection more difficult in study 8.  This is evident from the shifting of the ROC curves down and to the right (lower rates of true positives for a given false positive rate) in study 8 relative to the corresponding simulations without the misspecification of the nuisance parameters in study 4.  The same effect was not observed between the ROC curves of studies 3 and 7.
+
+In all cases, the SBA curves were at least as close as the BEB curves to the expected upper limit.  In studies 3 and 7 (50\% $\omega=1$, 50\% $\omega=1.5$), under M2a, where the estimates of the $p_{\omega>1}$ and $\omega_{>1}$ parameters were unstable (supplementary fig. \ref{fig:s3478hists}), the gaps between the curves for BEB and SBA were the largest, even when the number of taxa was increased from 5 to 30 (fig. \ref{fig:roc_30_taxa}).  This indicates that SBA, for a given false positive rate, had more power to detect sites under positive selection than BEB.
+In studies 4 and 8 (45\% $\omega=0$, 45\% $\omega=1$, 10\% $\omega=5$), where the parameters of the $\omega$ distribution were well estimated, all approaches (NEB, BEB, and SBA) performed well and the ROC curves were all close to the expected upper limit.  Taken together, the results suggest that SBA balances accuracy and power at least as well as BEB and may be preferable to BEB when parameter estimates are unstable.
+
+\subsection*{Real Data Analysis}
+We began our analysis of the 16 real datasets (described in Methods and summarized in table \ref{tab:realDataResultsOverview}) by using the bootstrap distributions of the MLEs to investigate their properties.  We examined the unsmoothed distributions of the parameters of the $\omega$ distribution.  These distributions indicate that the MLEs for a given model can have very different properties in different real datasets (supplementary figs. \ref{fig:real_genes_m2a_p0_w0_mles}, \ref{fig:real_genes_m2a_p1_mles}, \ref{fig:real_genes_m2a_mles}, \ref{fig:real_genes_m8_mles}).  Although the real data represent different degrees of \textit{regular} and \textit{irregular} model properties, we were able to identify groups of genes that represent both extremes.  The \textit{regular} cases had no clear evidence of MLE instabilities and low bootstrap variance (e.g., lysin; fig. \ref{fig:hists_lysin_CDH3_mles}\subref{sfig:lysin_m2a_mles},\subref{sfig:lysin_m8_mles}).  We determined that the $\omega$ distributions had been well estimated for 6 genes (\textit{pol}, \textit{vif}, lysin, \textit{nuoL3}, \textit{RafL}, and \textit{TrbL-VirB6\_3}).  In contrast, we uncovered evidence of MLE instabilities in other genes (e.g., \textit{CDH3}; fig. \ref{fig:hists_lysin_CDH3_mles}\subref{sfig:CDH3_m2a_mles},\subref{sfig:CDH3_m8_mles}).  We determined that the $\omega$ distributions had been poorly estimated for 5 genes (\textit{CDH3}, \textit{mivN}, \textit{pgpA}, \textit{tax}, and \textit{TrbL-VirB6\_2}) under at least one model.  Because no single summary statistic (number of taxa, sequence length, tree length) was generally predictive of \textit{irregular} model properties, we recommend visual inspection of the bootstrap distributions for all real data analyses (supplementary figs. \ref{fig:real_genes_m2a_mles}, \ref{fig:real_genes_m8_mles}).
+
+Next we investigated the degree to which the real data results obtained under BEB, NEB, and SBA were consistent with each other.  This is challenging, because the posterior probability thresholds for site classification are not calibrated to give comparable false positive rates.  Our solution was to measure the rank correlations of the site-specific posterior probability scores for positive selection between methods (BEB, NEB, and SBA).  As there are a large number of pairwise comparisons, we took the mean relationship between methods for both the genes representing \textit{regular} and \textit{irregular} model estimation (table \ref{tab:method_cors}).  We found that when MLEs are well estimated (\textit{regular} genes), there is stronger agreement among all three methods in the ranking of sites according to the signal for positive selection.  In contrast, when the $\omega$ distributions are poorly estimated (genes representing \textit{irregular} estimation), BEB and SBA are generally consistent in their rankings, but differ from NEB.  These results suggest that NEB's inability to accommodate MLE uncertainty in such datasets has the largest effect on the posteriors.  However, the problem of calibration remains.  Our simulation studies revealed that using a common posterior probability threshold for classification does not guarantee a similar trade-off between accuracy and power for different methods.  Indeed, we see evidence of this in the real data.  Comparing the counts of positively selected sites identified in the genes using thresholds of 0.50 and 0.95 reveals differences between BEB and SBA (table \ref{tab:num_sites_good_bad_genes}), despite large rank correlations.  Under M2a, there was a stark difference between the \textit{irregular} genes and all other genes.  ROC curves for simulations studies are better suited for comparing methods, because they give direct comparisons of power at the same false positive rate.
+
+\label{subsec:roc_opt}
+We also used rank correlation to investigate the robustness of the methods (BEB, NEB, and SBA) to the chosen model (M2a versus M8).  We did this by computing the rank correlation, between models, of the site posterior probabilities obtained by the same method (table \ref{tab:model_cors}).  For the \textit{regular} genes, all three methods had high correlations with low variably.  For the genes representing \textit{irregular} estimation, the correlation was lower and the variability larger for NEB as compared to BEB and SBA.  The similarity across models that we observed for SBA may be a consequence of using nonparametric bootstrapping, which should show robustness to model misspecification.  It seems that BEB's application of uniform priors to the $\omega$ distribution achieved a similar effect.
+
+Up to this point, bootstrapping has been used to obtain surrogates for posteriors. An alternative use of bootstrapping is to construct confidence intervals for posteriors to quantify the uncertainty at any given site about what the true posterior of positive selection is. For the real data, these confidence intervals differed substantially between M2a and M8, highlighting differences between the two modelling frameworks. For sites having a posterior of at least 0.9 under one or more methods, the M8 confidence intervals for those sites were never wider than the corresponding M2a intervals (table \ref{tab:interval_widths_ps_sites}).  This result reflects broad differences between the MLE distributions obtained under these two models; MLE distributions under M8 tend to be tighter, and more likely located away from a boundary (supplementary figs. \ref{fig:real_genes_m2a_mles}, \ref{fig:real_genes_m8_mles}).  We believe this represents empirical support for the commonly held notion that M8 is more powerful than M2a \citep{wong2004accuracy}.  However, this relationship should not be assumed to hold when the MLEs are poorly estimated.  Confidence interval widths were at the maximum (1.0) for both M8 and M2a in three of the five genes representing \textit{irregular} estimation.  These findings highlight the importance of (1) inspecting bootstrap distributions to gain insights into the challenges posed by the data in hand, and (2) using SBA to accommodate MLE uncertainties (especially when they are poorly estimated).
+
+Lastly, we interpret our results for the \emph{tax} gene of the human T-cell lymphotropic virus. This gene warrants special attention because it has a highly unusual site-pattern distribution, extreme MLEs, and has been employed as a boundary case in several studies of the NEB and BEB classifiers \citep{suzuki2004false,yang2005bayes}. The dataset has 20 taxa and 181 sites, 158 (87\%) of which are invariant across all 20 lineages.  At each of the 23 variable sites, there is just one codon that differs from all the others with 21 of the 23 codon changes coding for a different amino acid.  This atypical site-pattern distribution corresponds to a relatively large number of nonsysnonymous substitutions over very short branch lengths (mean branch length: $0.0064$ under both M2a and M8). A very high probability of positive selection (i.e., large values for both the $p_{\omega>1}$ and $\omega_{>1}$ parameters) is required to account for the nonsynonymous substitutions when the branch lengths are so short. In fact, both models M2a and M8 estimate 100\% of the sites to be in the $\omega>1$ class. This result belies that fact that considerable instability is associated with those parameter estimates, as revealed by bootstrapping (supplementary figs. \ref{fig:real_genes_m2a_mles}, \ref{fig:real_genes_m8_mles}). Since NEB ignores parameter value uncertainty, it must assign a conditional posterior probability of $\omega>1$ ($Pr=1.0$) for all sites, including those that are invariant. In contrast, the site posteriors for BEB and SBA were similar and depended on the site patterns (supplementary table \ref{tab:tax}).  As expected, the SBA signal for positive selection was strongest at the 21 sites with nonsynonymous changes (M2a: $0.87 < Pr < 0.89$; M8: $0.99 < Pr < 0.99$), as compared to all other sites (M2a: $0.55 < Pr < 0.60$; M8: $0.76 < Pr < 0.80$).  The SBA confidence intervals under M8 revealed that the estimates of $Pr$ for the 21 sites with a nonsynonymous change were more reliable (average width: 0.028) than for the invariant sites (average width: 0.418).  We suggest this result is appropriate for these data. Almost all the signal in this dataset is contained in those 21 sites, and it is difficult to reconcile this amount of nonsynonymous change over such short branches without strong positive selection.  Moreover, when branch lengths are very short, an invariant site can only be viewed as carrying no signal about whether the $\omega$ value would be small or large over longer evolutionary periods. This leads to very wide 95\% SBA $Pr$ confidence intervals for these sites.
+
+%% Pr ranges h=.4 for SBA
+%%                                                                                                  M2A           ||        M8
+%%                                                                                        NEB |   BEB   |   SBA   || NEB |   BEB   |   SBA
+%% NS Sites : 2,4,39,43,53,60,62,69,81,85,92,101,108,115,146,152,154,157,161,166,181 (21)  1  | .91,.93 | .87,.89 || 1   | .96,.96 | .99,.99
+%% S  Sites : 33,38 (2)                                                                    1  | .59,.59 | .58,.58 || 1   | .72,.72 | .79,.79
+%% Invariant Sites :                                                                       1  | .55-.61 | .55-.60 || 1   | .69-.73 | .76-.80
+
+%% Pr ranges h=1 for SBA
+%%                                                                                                  M2A           ||        M8
+%%                                                                                        NEB |   BEB   |   SBA   || NEB |   BEB   |   SBA
+%% NS Sites : 2,4,39,43,53,60,62,69,81,85,92,101,108,115,146,152,154,157,161,166,181 (21)  1  | .91,.93 | .94,.95 || 1   | .96,.96 | .94,.95
+%% S  Sites : 33,38 (2)                                                                    1  | .59,.59 | .49,.49 || 1   | .72,.72 | .49,.49
+%% Invariant Sites :                                                                       1  | .55-.61 | .45-.51 || 1   | .69-.73 | .45-.51
+
+\section*{Discussion}
+We have presented an approach, based on an unconventional use of the nonparametric bootstrap, for evaluating MLE instabilities and improving site-specific inference of positive selection.  For any given site in an alignment, conclusions about positive selection are based on the aggregation and distributions of many estimates of $\omega$ and many posterior probabilities.  An important step in our approach involves smoothing the bootstrap distributions of the parameter estimates using techniques borrowed from kernel density estimation.  This step is critical for overcoming instabilities in parameter estimation.  Kernel smoothing also has the benefit of reducing computational costs relative to procedures that use full bootstrap sampling to obtain comparable numbers of MLEs.
+
+Application of BEB, NEB, and SBA using models M2a and M8 to 100 simulated datasets in each of 10 different simulation scenarios showed that, under difficult simulation conditions when regularity conditions have not been met, NEB often poorly controls false positive classification of sites, even when the number of taxa is large.  This is in contrast to past recommendations, which suggested NEB does well at controlling false positive rates when analyzing large datasets (many taxa and long sequences) \citep[e.g.,][]{yang2005bayes}.  By accounting for variability of estimation, both BEB and SBA achieve better control of the false positive rates.  However, SBA provided consistently better control under M8 when there was mild model misspecification (studies 5-8 under in table 1), and this was unaffected by pre-screening via the LR test.  We note that all real data are expected to be affected, to some degree, by model misspecification.
+
+By accounting for variability of estimation, both BEB and SBA achieve good power relative to NEB as is evidenced by their tending to be closer to the expected upper limit of performance in the ROC curves.  Some of the simulation results suggest that M2a is a better-performing model. For instance, M2a gave 1) ROC curves closer to the expected upper bound in some cases (fig. \ref{fig:roc}) and 2) lower false positive rates (table \ref{tab:sim}). This may, however, be a consequence of the simulations conditions being more suitable for M2a than M8.  For example, in studies 3 and 7, half the sites were simulated with $\omega=1$, and M2a has a site class with $\omega=1$ fixed.  On the other hand, considering sites with larger posteriors in the real data analysis, the 95\% posterior confidence intervals were usually narrower (and never wider) for M8 than M2a.  This supports previous results that suggest M8 has more power to detect sites under positive selection \citep{wong2004accuracy}.  The $\beta$-globin gene serves as a good example.  Of the five sites in this gene where either NEB or BEB gave a posterior of at least 0.9, the SBA confidence interval widths were all 1 for M2a, but averaged 0.129 for M8.  Moreover, the $\omega_{>1}$ parameter distributions tended to be wider for M2a than M8, particularly for the genes that displayed properties suggesting regularity conditions were met.  This is probably because the beta distribution used by M8 to model $\omega<1$ has more flexibility in real data conditions compared to an M2a model with the same number of parameters.
+
+An appealing attribute of BEB, relative to SBA, is its limited use of computational resources.  Each SBA bootstrap analysis may use similar computational resources as BEB does for the one original dataset.  However, SBA's greater computational requirements is a trade-off for a more rigorous assessment of the parameter estimation.  For example, SBA adjusts for the uncertainty in all model parameters, including branch lengths, while BEB does not.  A new BEB implementation that integrated over branch lengths would require costlier techniques because numerical integration does not scale well with higher dimension.  Moreover, because SBA estimates each set of bootstrap parameters independently, they can be estimated in parallel.  On a computing cluster with as many cores as bootstrap samples generated, the wall-clock times for BEB and SBA are comparable.
+
+There are a limited number of BEB implementations for different models.  By contrast it is comparatively trivial to apply SBA to new models once the basic capacity for bootstrapping and parameter smoothing are in place.  This could facilitate the application of SBA to a wider variety of inference problems in molecular evolution than has occurred with BEB.  SBA for the popular branch-site codon model A \citep{yang2002bcodon,zhang2005evaluation} was implemented as a demonstration of the feasibility of SBA implementations for new models.  A new, preliminary implementation, which was completed within a few hours, can be found at https://github.com/Jehops/codeml\_sba.  An overview of the analysis of the \textit{NR1D1} gene \citep{baker2016functional} under SBA can be found in the supplementary file S2.
+
+There are useful by-products of the SBA approach for classifying sites. The histograms of the distributions of the MLEs over bootstrap samples provide insight into the degree of irregularity of the estimation.  For several of the datasets, most notably the \emph{tax} gene dataset, these histograms provided a clear indication that the MLEs were unstable.  In such cases, site classifications should be accepted with caution.  Even when regularity conditions have been met, the confidence intervals of the posteriors provide an additional tool for assessing the certainty about the strength of the signal for positive selection at an individual site.  We suggest that future analyses of real data should include both visual inspection of bootstrap distributions and reporting of SBA-derived confidence intervals of the posterior probabilities associated with positive selection.
+
+Bootstrapping has been shown to provide effective adjustments to EB methods in other settings.  For example, \citet{laird1987empirical} studied the application of bootstrapping with EB methods for random effects models where both the observations and random effects distributions were Gaussian.  They argued that confidence intervals produced from bootstrap posteriors were frequently narrower than they should be and that bootstrap averaging helped to ameliorate problems.  They speculated that bootstrapping would produce good EB inferences for a broad class of EB problems.  In a prediction setting, a procedure that aggregates predictors generated from bootstrap replicates was proposed by \citet{breiman1996bagging}, which was shown to move some unstable predictors closer to optimality.  The bagging procedure used in that paper is equivalent to using the median posterior to classify sites under SBA.  Our experiments (data not shown) indicated that the average is a better measure of the middle of the distribution of site posterior probabilities.
+
+While using the data in hand to account for errors in MLE estimation is helpful for detecting sites under positive selection, refinements of the SBA approach are warranted.  Like other approaches, we have avoided the difficult process of calibrating for type I errors in real data.
+Choosing an optimal bandwidth parameter for smoothing a distribution is also a difficult process.  Under-smoothing will leave spurious bumps and irregularities in the distribution and over smoothing will remove useful information and increase bias.  There are different theoretical suggestions for the size of the bandwidth parameter, but these can be challenging to apply as they may depend on the unknown density \citep[p. 176]{venables2013modern}.
+SBA uses bootstrap distributions to highlight problems when MLEs fall on or close to their boundaries.  We are hopeful that a penalized likelihood approach, which can push such estimates to the interior of the parameter space, will be helpful.  Bootstrapping does well to accommodate the variance in a parameter estimate, however, when estimates are very small, the variance, even under bootstrapping, may be underestimated.  This may be a problem we encountered with the branch lengths of the \emph{tax} gene.  Some preliminary experiments show that perturbing the very small branch length estimates of the \emph{tax} gene can cause large differences in the MLEs of the parameters of the $\omega$ distribution.  This suggests that applying kernel smoothing to parameters other than those defining the $\omega$ distribution may be helpful.
+
+SBA can be applied to a wide variety of problems in molecular evolution where uncertainties or instabilities in MLEs impact inference based on empirical Bayes.  Examples where the method can be directly applied, with little or no modification, include: classification of sites into general rate categories \citep[e.g.,][]{mayrose2004comparison}, identification of positively selected sites in non-coding DNA \citep[e.g.,][]{haygood2007promoter}, identification codon sites subject to episodic change in selection pressure \citep[e.g.,][]{yang2002bcodon}, detection of Type-I functional divergence in protein sequences \citep[e.g.,][]{gaston2011phylogenetic}, detection of amino acid sites having shifts in the pattern of exchangeabilities \citep[e.g.,][]{le2012modeling}, and detection of amino acid sites evolving under a covarion-like evolutionary process \citep[e.g.,][]{penn2008evolutionary}.  With some modification, SBA could be applied to the task of ancestral state reconstruction.  As the field moves towards increasingly more complex models, there will be increasing demand for methods such as SBA that can account for parameter-estimate uncertainties.
+
+\section*{Theory and Methods}
+\subsection*{Markov Models of Codon Evolution}
+Consider an alignment of DNA sequences with $n$ codon sites and denote the codons in the sequences at site $h$ $(h=1, \dots, n)$ as $x_h$, the site pattern at site $h$.  The models considered here are described in \citep{nielsen1998likelihood} and define the relative, instantaneous substitution rate between codon $i$ and $j$ $(i \neq j)$ at site $h$ as
+\begin{equation}
+  Q_{ij} \propto \left\{
+    \begin{array}{l l}
+      0, &  \mbox{if \emph{i} and \emph{j} differ at two or three codon positions,}\\
+      \pi_j, &  \mbox{if \emph{i} and \emph{j} differ by a synonymous transversion,}\\
+      \kappa\pi_j, &  \mbox{if \emph{i} and \emph{j} differ by a synonymous transition,}\\
+      \omega\pi_j, &  \mbox{if \emph{i} and \emph{j} differ by a nonsynonymous transversion,}\\
+      \omega\kappa\pi_j, &  \mbox{if \emph{i} and \emph{j} differ by a nonsynonymous transition}
+    \end{array} \right.
+  \label{eq:model}
+\end{equation}
+where $Q$ is the rate matrix of a continuous-time, stationary, time-reversible Markov process.  The $\pi_j$ parameters above are the stationary frequencies of codon $j$ and the $\kappa$ parameter is the transition to transversion rate ratio.  The $\omega$ parameter, which has an interpretation as the non-synonymous to synonymous rate ratio, is the key parameter for the inference of positively selected sites \citep[pp. 48-68]{Yang2006Computational}.  The transition-probability matrix, $P(t)$, which gives the probabilities of state changes over time, $t$, relates to the rate matrix, $Q$, by $P(t) = e^{Qt}$.  For a phylogenetic tree with branch lengths, the likelihood of the data at codon site $h$ given the parameters $\theta$, $f(x_h|\theta)$, can be calculated using (\ref{eq:model}) and Felsenstein's pruning algorithm \citep{felsenstein1973maximum}.
+
+Because sites are assumed to evolve independently, the log likelihood for a sequence alignment with more than one site pattern $(n>1)$ is the sum of the site log likelihoods, $\ell = \log(L) = \sum_{h=1}^{n}\log\{f(x_h|\theta)\}$.
+
+To account for variability in selection pressure across sites, $\omega$ is usually allowed to vary.  The models we consider are a subset of the models described in Yang et al. (2000), which assume the value of $\omega$ at site $h$ comes from some distribution.  To avoid difficulties applying the pruning algorithm, this distribution is always discrete with weights $p_1,\dots,p_{k}$ on $\omega_1\dots,\omega_{k}$ values.  With $k$ classes, each with an estimate of the $\omega$ ratio and corresponding weight, the likelihood the data at site $h$ then becomes $f(x_h|\theta) = \sum_{i=1}^{k}p_if(x_h|\omega_i,\psi)$, where $\psi$ denotes the model parameters other than those describing the $\omega$ distribution.
+
+Bayes formula is used to calculate a posterior probability that a given site evolved under site class $i$ with $Pr(\omega^{(h)} = \omega_i|x_h,\psi) = p_if(x_h|\omega_i,\psi) / \sum_{j=1}^{k}p_jf(x_h|\omega_j,\psi)$.  The NEB approach fails to account for sampling errors in any of the parameters estimated by ML.  To accommodate the uncertainties in the parameters of the $\omega$ distribution, \citet{yang2005bayes} used a hierarchical BEB approach by assigning prior probabilities to these parameters.
+
+\subsection*{Bootstrap Methods to Adjust for Uncertainty}
+To construct confidence intervals for a parameter, $\theta$, and correct bias, \citet{efron1979bootstrap} devised the bootstrap.
+A bootstrap sample, $\bm{x^*}$, is obtained by drawing the values, $x_1^*,\dots,x_n^*,$ with replacement from a random sample, $\bm{x}$.
+For each of $b=1 \dots B$ bootstrap samples we can then calculate the bootstrap estimate, $\hat{\theta}^{*b}$, to obtain the bootstrap distribution of $\hat{\theta}$.  Bootstrap distributions are commonly used with phylogenetic data to test the topology of a proposed tree.
+We applied the bootstrap to site patterns in a sequence alignment to adjust for the uncertainty in parameter estimates in EB classification.
+The procedure is illustrated in figure \ref{fig:bootstrap}:
+\begin{enumerate}
+  \item From an alignment of protein coding DNA sequences, $\bm{x}$, with $n$ codon sites, randomly sample site patterns with replacement to obtain a bootstrap sample, $\bm{x}^{*b}$, with $n$ sites.
+  \item Estimate the MLEs, $\hat{\theta}^{*b}$, for bootstrap sample $\bm{x}^{*b}$.
+  \item Use $\hat{\theta}^{*b}$ and $\bm{x}$ to calculate posterior probabilities, $Pr_h(\omega>1|x_h,\hat{\theta}^{*b})$, that each site, $h$, is under positive selection.
+  \item Repeat steps 1 through 3 $B$ times to calculate $B$ sets of posterior probabilities for each codon site.
+  \item Calculate an aggregate posterior probability that each site is under positive selection by, e.g., averaging posterior probabilities over bootstrap replicates, $\sum_{b=1}^BPr_h(\omega>1|x_h,\hat{\theta}^{*b})/B$.
+% or by taking the median, $med_iPr_h^i(\omega>1|\bm{X},\theta^i)$.
+\end{enumerate}
+A preliminary implementation of the SBA method supporting codon models M2a, M8, and branch-site model A, built upon the codeml application from the PAML package \citep{yang2007paml}, can be found at \\ https://github.com/Jehops/codeml\_sba.
+
+\subsection*{Kernel Smoothing to Approximate the Bootstrap Distribution}
+Kernel smoothing \citep{akaike1954approximation,parzen1962estimation,rosenblatt1956remarks,wand1994kernel} is class of nonparametric techniques that can improve estimation of a distribution.  The kernel density estimator for a continuous density $f$, $\hat{f}(x;h) = (nh)^{-1}\sum_{i=1}^nK([x-X_i]/h)$, includes a kernel density (probability) function, $K$, to locally average or smooth observations and the amount of smoothing is controlled by a bandwidth parameter, $h$.  For small $h$, each of the $h^{-1}K([x-X_i]/h)$ contributions are large only for $x$ close to some $X_i$ giving rise to a bumpy
+distribution, whereas for $h$ large the $h^{-1}K([x-X_i]/h)$ contributions overlap giving a much smoother distribution \citep{silverman1987bootstrap}. We used kernel density estimation to create smoothed bootstrap distributions for the $p$ parameters of the $\omega$ distributions under models M2a and M8 using a uniform kernel.
+
+Kernel density estimation requires a bandwidth parameter as input. One method for determining $h$ is using leave-one-out cross validation, $\hat{f}_{(-k)}(x;h) = (n-1)^{-1}h^{-1}\sum_{i\ne k}K([x - X_i]/h)$ \citep[p. 184]{venables2013modern}.  In this approach, $h$ is chosen to maximize the sum of the logged density
+estimates $\sum_k \log \hat f_{(-k)}(x_k;h)$, where $\hat f_{(-k)}(x;h)$ is the kernel density estimate constructed from all of the $x_i$ except $x_k$.  However, our experiments using leave-one-out likelihood to choose an optimal bandwidth parameter for the $p$ parameters of M2a and M8 merely resulted in smoothed estimates of the biased bootstrap distributions.  To obtain conservative estimates of the $p$ parameters that suppressed the influence of instabilities we chose to over smooth by using a bandwidth parameter of $h=0.4$ for  all applications of SBA.
+
+Adding kernel smoothing to the bootstrap algorithm increases the number of parameter estimates used in step 5 of the unsmoothed algorithm by sampling from a smoothed bootstrap distribution. The adjustment is in step 2 of the algorithm. The ML parameters estimated from bootstrap sample $b$, $\hat\theta^{*b}$, are replaced by $\theta^{sb}$ sampled from the smoothed bootstrap distribution.  The rest of the algorithm proceeds as in the unsmoothed version, but using $\theta^{sb}$ in place of $\hat\theta^{*b}$.
+
+For model M8, the step 2 adjustment is as follows.  For each $\hat\theta^{*b}$, $p_{\omega < 1}^{sb}$ samples are repeatedly drawn from a univariate uniform distribution centered at $\hat p_{\omega < 1}^{*b}$ with width $2h$.  If necessary, the minimum and maximum points of the distribution are truncated to 0 and 1.  Let $\theta^{sb}$ denote $\hat\theta^{*b}$ with $p_{\omega<1}^{sb}$ replacing $\hat p_{\omega<1}^{*b}$ ($p_{\omega>1}^{sb} = 1-p_{\omega<1}^{sb}$).  The same procedure is used under model M2a, however, with three weight parameters, the sampling is done on a bivariate uniform distribution with the following additional restrictions: i) $p_{\omega<1}^{sb} + p_{\omega=1}^{sb} \le 1$, ii) $(\hat{p}_{\omega<1}^{*b} - h) \le p_{\omega<1}^{sb} \le (\hat{p}_{\omega<1}^{*b} + h)$, and iii) $(\hat{p}_{\omega=1}^{*b} - h) \le p_{\omega=1}^{sb} \le (\hat{p}_{\omega=1}^{*b} + h)$.  As with M8, if necessary, the minimum and maximum points of the distribution are truncated at 0 and 1, and $p_{\omega>1}^{sb} = 1 - p_{\omega<1}^{sb} - p_{\omega=1}^{sb}$.
+
+\subsection*{Simulation Studies}
+Datasets were simulated using \emph{EvolverNSSites} from the PAML 4.8a package \citep{yang2007paml} and \emph{Indelible} \citep{fletcher2009indelible} following some of the settings described in \citet{wong2004accuracy}.  To compare the relative performance of BEB, NEB, and SBA for predicting sites under positive selection, 10 different simulation studies, divided into three scenarios, were used.  Table \ref{tab:sim} gives an overview of the $\omega$ distributions used to simulate the data.  The \textit{Correct Model Scenario} included four simulation studies where the nuisance parameters, $\kappa=1$ and $\pi_i=1/61$, matched the fitted model.  The \textit{Mild Misspecification} and \textit{Heavy Misspecification} scenarios included four simulation studies with mild misspecification and two studies with heavy misspecification of the fitted model, respectively.  The data in the \textit{Mild Misspecification Scenario} was simulated using $\kappa=8$ and empirical codon frequencies derived from application of the general time-reversible model \citep[p. 33]{Yang2006Computational} to the \textit{TrbL-VirB6-3} plasmid conjugative transfer protein of \textit{Rickettsia}.  In the fitted model, $\kappa$ was estimated, while the misspecification was introduced by using F3x4 (expected codon frequencies calculated using the nucleotide frequencies at the three codon positions).  For the \textit{Heavy Misspecification Scenario}, study 9 used the heavily biased codon frequencies from the Drosophila \textit{GstD1} gene and $\kappa=8$ to simulate the data.  In study 10, there were two heterogeneous classes of sites.  Half the sites were simulated using equal codon frequencies, $\kappa=1$, and $\omega=0.5$, while the other half with the Drosophila gsTD gene codon frequencies, $\kappa=8$, and $\omega=1$.  For both studies in this scenario, analysis was carried out using a single set of codon frequencies (set equal to $1/61$) and a single $\kappa$ parameter estimated for all sites in the data set.  For all studies in the three scenarios, 100 alignments, each having 500 codons, were simulated with the same 5-taxon tree from \citet{wong2004accuracy}.  The studies in the \textit{Correct Model Scenario} were repeated under model M2a with the 30-taxon tree from the same paper.
+
+\subsection*{Real Data Analysis}
+Table \ref{tab:realDataResultsOverview} describes the real data sequences we analyzed under models M2a and M8 using NEB, BEB, and SBA.  Of the the 16 genes, eight code for transmembrane proteins in \textit{Rickettsia} (\textit{ccmF}, \textit{mivN}, \textit{perM}, \textit{pgpA}, \textit{RfaL}, \textit{TrbL-VirB6\_2}, and \textit{TrbL-VirB6\_3}) and were previously analyzed in \citet{bao2008likelihood}.  Three genes from the HIV-1 virus (\textit{env} \textit{pol}, and \textit{vif}) and a $\beta$-globin gene were described and analyzed in \citet{yang2000codon}, two primate genes (\textit{CDH3} encoding cadherin and \textit{ENAM} encoding enamelin), a lysin gene from \citet{yang2000maximum}, and the \emph{tax} gene from the human T-cell lymphotrophic virus (HTLV) that was analyzed by \citet{suzuki2004false}.  All data is available from the Dryad Digital Repository: http://dx.doi.org/10.5061/dryad.xxxxx.
+
+\clearpage
+
+\bibliographystyle{mbe}
+\bibliography{../../references.git/refs}
+
+\clearpage
+
+\section*{Tables}
+
+\begin{table}[H]
+  \begin{threeparttable}
+    \caption{Simulation design and false positive rates under NEB, BEB, and SBA each with models M2a and M8.}
+    \centering
+    \begin{tabular}[h!]{*{3}l*{6}c}
+      \toprule
+      Study              & Misspecification   & $\omega$ distribution  & \multicolumn{2}{c}{NEB}       & \multicolumn{2}{c}{BEB}         & \multicolumn{2}{c}{SBA}       \\
+      \cmidrule(lr){1-1}   \cmidrule(lr){2-2}   \cmidrule(lr){3-3}       \cmidrule(lr){4-5}              \cmidrule(lr){6-7}                \cmidrule(lr){8-9}
+                         &                    &                        & M2a           & M8            & M2a           & M8              & M2a           & M8            \\
+      \cmidrule(lr){4-4} \cmidrule(lr){5-5}    \cmidrule(lr){6-6} \cmidrule(lr){7-7}  \cmidrule(lr){8-8} \cmidrule(lr){9-9}
+      1                  & None               & 100\% 1                & \textbf{0.34} & \textbf{0.35} & 0.00          & 0.00            & 0.00          & 0.00          \\
+      2                  & None               & 50\% 0.5, 50\% 1       & 0.00          & 0.00          & 0.00          & 0.00            & 0.00          & 0.00          \\
+      3                  & None               & 50\% 1 50\% 1.5        & \textbf{0.35} & \textbf{0.37} & 0.00          & \textbf{0.05}   & 0.00          & 0.02          \\
+      4                  & None               & 45\% 0, 45\% 1, 10\% 5 & 0.00          & 0.00          & 0.00          & 0.01            & 0.00          & 0.00          \\
+      \\
+      5                  & Mild               & 100\% 1                & \textbf{0.20} & \textbf{0.37} & 0.00          & \textbf{0.24}   & 0.00          & \textbf{0.13} \\
+      6                  & Mild               & 50\% 0.5, 50\% 1       & 0.00          & \textbf{0.13} & 0.00          & \textbf{0.11}   & 0.00          & 0.02          \\
+      7                  & Mild               & 50\% 1, 50\% 1.5       & \textbf{0.30} & \textbf{0.30} & 0.00          & \textbf{0.39}   & 0.00          & \textbf{0.12} \\
+      8                  & Mild               & 45\% 0, 45\% 1, 10\% 5 & 0.00          & 0.04          & 0.00          & \textbf{0.12}   & 0.00          & 0.00          \\
+      \\
+      9                  & Heavy              & 100\% 1                & \textbf{0.71} & \textbf{0.71} & \textbf{0.55} & \textbf{0.62}   & \textbf{0.13} & \textbf{0.52} \\
+      10                 & Heavy              & 50\% 0.5, 50\% 1       & \textbf{0.53} & \textbf{0.50} & 0.00          & 0.00            & 0.00          & 0.01          \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:sim}
+    \begin{tablenotes}
+      \small
+    \item A posterior probability threshold of 0.95 was used for classifying sites to be under positive selection.  Under SBA, smoothing was carried out using a uniform kernel with a bandwidth parameter $h=0.4$.
+    \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\clearpage
+
+\begin{sidewaystable}
+  \begin{threeparttable}
+    \caption{Genes analyzed under models M2a and M8 using NEB, BEB, and SBA approaches for site classification.}
+    \centering
+    \begin{tabular}[]{*{10}l}
+      \toprule
+      &       &       & \multicolumn{2}{c}{-lnL}          &                   &           &                \\
+      \cmidrule(lr){4-5}
+      \multicolumn{1}{c}{Gene} & \multicolumn{1}{c}{$N_t$} & \multicolumn{1}{c}{$N_c$} & \multicolumn{1}{c}{M1a/M2a} & \multicolumn{1}{c}{M7/M8} & \multicolumn{1}{c}{p-value} & \multicolumn{1}{c}{TTL} & \multicolumn{1}{c}{$N_s$} \\
+      \cmidrule(lr){1-1} \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4} \cmidrule(lr){5-5} \cmidrule(lr){6-6} \cmidrule(lr){7-7} \cmidrule(lr){8-8}
+      $\beta$-globin         & 17    & 144   & 3716.14/3712.55 & 3697.22/3686.13 & 0.0275/1.53e-5    & 8.40/8.57 & 0(0)/3(4) \\
+      \textit{ccmF}          & 5     & 635   & 6121.78/6113.57 & 6127.62/6116.48 & 2.72e-4/1.46e-5   & 5.60/3.03 & 3(2)/3(5) \\
+      \textit{CDH3}          & 11    & 176   & 5629.97/5623.37 & 5630.66/5623.88 & 1.35e-3 /1.14e-3  & 0.56/0.56 & 1(1)/1(1) \\
+      \textit{ENAM}          & 11    & 1142  & 7514.30/7509.28 & 7609.16/7605.74 & 6.61e-3/0.0327    & 0.46/0.56 & 1(1)/2(1) \\
+      \textit{env}           & 13    & 91    & 1114.64/1106.45 & 1115.40/1106.39 & 2.76e-4/1.23e-4   & 2.04/2.04 & 2(2)/2(4) \\
+      lysin                  & 25    & 134   & 4472.65/4410.28 & 4472.16/4410.57 & 2.86e-14/0.00     & 8.81/8.82 & 22(22)/23(23) \\
+      \textit{mivN}          & 5     & 504   & 3383.45/3832.93 & 3834.69/3831.44 & 0.595/0.0388      & 1.62/1.60 & 0(0)/1(1) \\
+      \textit{nuoL3}         & 5     & 499   & 5006.16/4978.97 & 5011.37/4977.19 & 1.56e-12/1.44e-15 & 4.58/4.49 & 9(8)/10(10) \\
+      \textit{perM}          & 5     & 351   & 2619.88/2619.43 & 2621.64/2617.94 & 0.638/0.0247      & 1.78/1.80 & 0(0)/2(0) \\
+      \textit{pgpA}          & 5     & 198   & 1541.27/1539.29 & 1542.65/1538.91 & 0.138/0.0238      & 2.93/2.23 & 1(0)/1(1) \\
+      \textit{pol}           & 23    & 947   & 9394.05/9363.96 & 9405.74/9365.88 & 8.52e-14/0.00     & 1.31/1.30 & 6(6)/10(13) \\
+      \textit{RfaL}          & 5     & 403   & 3964.89/3955.34 & 3970.38/3955.44 & 7.16e-05/3.23e-7  & 3.46/3.46 & 2(1)/4(3) \\
+      \textit{tax}           & 20    & 181   & 895.50/892.02   & 895.50/892.02   & 0.0309/0.0309     & 0.13/0.13 & 181(0)/181(21) \\
+      \textit{TrbL-VirB6\_2} & 5     & 657   & 5492.55/5492.52 & 5301.23/5286.43 & 0.976/3.74e-7     & 2.12/2.10 & 0(0)/1(0) \\
+      \textit{TrbL-VirB6\_3} & 5     & 938   & 8305.65/8288.36 & 8307.06/8269.09 & 3.09e-8/0.00      & 3.06/3.02 & 3(2)/18(11) \\
+      \textit{vif}           & 29    & 192   & 3393.83/3367.86 & 3400.45/3370.66 & 2.29e-06/1.16e-13 & 2.90/2.91 & 10(8)/10(10) \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:realDataResultsOverview}
+    \begin{tablenotes}
+      \small
+    \item $N_t$: number of taxa, $N_c$: sequence length in number of codons, -lnL: -log likelihood for each nested model pair, p-value of the likelihood ratio test for the presence of positive selection, TTL: total tree length estimated under M2a/M8, $N_s$: number of sites classified to under positive selection using a posterior probability threshold of 0.95 under M2a/M8 for NEB(BEB).
+    \end{tablenotes}
+  \end{threeparttable}
+\end{sidewaystable}
+
+\clearpage
+
+<<sp_cors,echo=F>>=
+## order for good genes: HIVpol, HIVvif, Lysin, nuoL3, RafL, TrbL-VirB3
+sp.cor.good.m2a.neb.beb <- c(0.91,1.00,1.00,0.98,1.00,1.00)
+sp.cor.good.m2a.neb.sba <- c(0.76,0.97,0.99,0.98,0.96,0.97)
+sp.cor.good.m2a.beb.sba <- c(0.85,0.98,0.99,0.99,0.97,0.97)
+
+sp.cor.good.m8.neb.beb <- c(0.97,0.99,1.00,1.00,0.99,1.00)
+sp.cor.good.m8.neb.sba <- c(0.88,0.97,0.99,0.98,0.98,0.96)
+sp.cor.good.m8.beb.sba <- c(0.95,0.99,1.00,0.99,0.99,0.94)
+
+## order for bad genes: CDH3, MivN, pgpA, tax, TrbL-VirB2
+## can't add tax, because all Prs are 1 for NEB
+sp.cor.bad.m2a.neb.beb <- c(0.4,0.77,0.72,0.72)
+sp.cor.bad.m2a.neb.sba <- c(0.4,0.78,0.72,0.72)
+sp.cor.bad.m2a.beb.sba <- c(1.0,0.96,0.98,0.98)
+
+sp.cor.bad.m8.neb.beb <- c(0.4,0.97,1.00,1.00)
+sp.cor.bad.m8.neb.sba <- c(0.4,0.91,0.95,0.98)
+sp.cor.bad.m8.beb.sba <- c(1.0,0.97,0.95,0.98)
+
+## order for good genes: HIVpol, HIVvif, Lysin, nuoL3, RafL, TrbL-VirB3
+sp.cor.good.neb <- c(0.91,1.00,1.00,1.00,0.99,0.97)
+sp.cor.good.beb <- c(0.98,1.00,0.99,0.99,0.99,0.97)
+sp.cor.good.sba <- c(1.00,1.00,1.00,1.00,1.00,1.00)
+
+## order for bad genes: CDH3, MivN, pgpA, tax, TrbL-VirB2
+sp.cor.bad.neb <- c(1.0,0.78,0.72,0.73)
+sp.cor.bad.beb <- c(1.0,1.00,0.98,1.00)
+sp.cor.bad.sba <- c(1.0,0.98,1.00,0.99)
+@
+
+\begin{table}[H]
+  \begin{threeparttable}
+    \caption{Spearman rank correlations between site posterior probabilities for each method of classification.}
+    \centering
+    \begin{tabular}[h!]{l*{4}c}
+      \toprule
+      & \multicolumn{2}{c}{{\bf \textit{Regular}}} & \multicolumn{2}{c}{{\bf \textit{Irregular}}} \\
+      \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+      & mean      & SD        & mean      & SD \\
+      \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4} \cmidrule(lr){5-5}
+      M2a                    &           &           &           &        \\
+      \hspace{1em} NEB/BEB   & 0.98      & 0.04      & 0.65      & 0.17   \\
+      \hspace{1em} NEB/SBA   & 0.94      & 0.09      & 0.66      & 0.17   \\
+      \hspace{1em} BEB/SBA   & 0.96      & 0.05      & 0.98      & 0.02   \\
+      M8                     &           &           &           &        \\
+      \hspace{1em} NEB/BEB   & 0.99      & 0.01      & 0.84      & 0.30   \\
+      \hspace{1em} NEB/SBA   & 0.96      & 0.04      & 0.81      & 0.27   \\
+      \hspace{1em} BEB/SBA   & 0.98      & 0.03      & 0.98      & 0.02   \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:method_cors}
+    \begin{tablenotes}
+      \small
+    \item The mean and standard deviation (SD) of the correlations are for real genes displaying \textit{regular} and \textit{irregular} estimation properties.
+    \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\clearpage
+
+\begin{table}[H]
+  \begin{threeparttable}
+    \caption{Number of sites identified to be under positive selection for the real data.}
+    \centering
+    \begin{tabular}[!ht]{*{7}l}
+      \toprule
+      & \multicolumn{3}{c}{M2a}       & \multicolumn{3}{c}{M8}     \\
+      \cmidrule(lr){2-4}              \cmidrule(lr){5-7}           \\
+      Gene                   & NEB      & BEB   & SBA        & NEB     & BEB    & SBA     \\
+      \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4} \cmidrule(lr){5-5} \cmidrule(lr){6-6} \cmidrule(lr){7-7} \\
+      \textit{CDH3}          & 1/1      & 12/1  & 46/0       & 1/1     & 22/1   & 117/5   \\
+      \textit{mivN}          & 1/0      & 7/0   & 1/0        & 4/1     & 12/1   & 28/0    \\
+      \textit{pgpA}          & 1/0      & 4/0   & 4/0        & 5/1     & 5/1    & 17/0    \\
+      \textit{tax}           & 181/181  & 181/0 & 181/0      & 181/181 & 181/21 & 181/21  \\
+      \textit{TrbL-VirB6\_2} & 0/0      & 16/0  & 0/0        & 11/1    & 18/0   & 59/0    \\
+      \hline
+      \rule{0pt}{3ex}\textit{pol}& 12/6     & 19/6  & 94/4       & 22/10   & 33/13  & 83/16   \\
+      lysin                  & 33/22    & 32/22 & 42/5       & 37/23   & 37/23  & 41/11   \\
+      \textit{nuoL3}         & 18/9     & 18/8  & 85/18      & 19/10   & 20/10  & 83/20   \\
+      \textit{RfaL}          & 20/2     & 20/1  & 70/1       & 33/4    & 41/3   & 74/3    \\
+      \textit{TrbL-VirB6\_3} & 28/3     & 27/2  & 73/9       & 45/18   & 44/11  & 134/48  \\
+      \textit{vif}           & 13/10    & 13/8  & 31/6       & 15/10   & 19/10  & 37/10   \\
+      \hline
+      \rule{0pt}{3ex}$\beta$-globin & 4/0& 5/0   & 11/0       & 8/4     & 8/4    & 17/4    \\
+      \textit{ccmF}          & 7/1      & 11/1  & 112/0      & 15/3    & 79/5   & 114/5   \\
+      \textit{ENAM}          & 9/1      & 21/1  & 184/0      & 44/2    & 31/1   & 78/1    \\
+      \textit{env}           & 14/3     & 16/3  & 21/3       & 16/3    & 22/5   & 24/3    \\
+      \textit{perM}          & 4/0      & 6/0   & 0/0        & 6/2     & 6/0    & 36/3    \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:num_sites_good_bad_genes}
+    \begin{tablenotes}
+      \small
+    \item  The posterior probability thresholds are 0.5/0.95.  The top genes represent \textit{irregular} estimation, the middle \textit{regular}, and the bottom genes are not categorized.
+    \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\clearpage
+
+\begin{table}[H]
+  \begin{threeparttable}
+    \caption{Spearman rank correlations between site posterior probabilities for models M2a and M8.}
+    \centering
+    \begin{tabular}[h!]{l*{4}c}
+      \toprule
+      & \multicolumn{2}{c}{{\bf \textit{Regular}}} & \multicolumn{2}{c}{{\bf \textit{Irregular}}} \\
+      \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+      & mean      & SD        & mean      & SD \\
+      \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4} \cmidrule(lr){5-5}
+      \hspace{1em} NEB       & 0.98      & 0.04      & 0.81      & 0.13   \\
+      \hspace{1em} BEB       & 0.99      & 0.01      & 1.00      & 0.01   \\
+      \hspace{1em} SBA       & 1.00      & 0.00      & 0.99      & 0.00   \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:model_cors}
+    \begin{tablenotes}
+      \small
+    \item The mean and standard deviation (SD) of the correlations are for real genes displaying \textit{regular} and \textit{irregular} estimation properties.
+    \end{tablenotes}
+    \end{threeparttable}
+\end{table}
+
+\clearpage
+
+\begin{table}[H]
+  \begin{threeparttable}
+    \caption{Average SBA posterior probability interval widths for sites with at least one method having a posterior probability over 0.9.}
+    \centering
+    \begin{tabular}[!ht]{*{4}l}
+      \toprule
+      Gene                       & \multicolumn{1}{c}{M2a}       & \multicolumn{1}{c}{M8} & \multicolumn{1}{c}{Difference} \\
+      \cmidrule(lr){1-1} \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4}
+      \textit{CDH3}              & 0.95     & 0.46  & 0.49    \\
+      \textit{mivN}              & 1.00     & 1.00  & 0.00    \\
+      \textit{pgpA}              & 1.00     & 1.00  & 0.00    \\
+      \textit{tax}               & 0.87     & 0.31  & 0.56    \\
+      \textit{TrbL-VirB6\_2}     & 1.00     & 1.00  & 0.00    \\
+      \hline
+      \rule{0pt}{3ex}\textit{pol}    & 0.78     & 0.78  & 0.00    \\
+      lysin                      & 0.70     & 0.49  & 0.20    \\
+      \textit{nuoL3}             & 0.26     & 0.21  & 0.05    \\
+      \textit{RfaL}              & 0.68     & 0.48  & 0.19    \\
+      \textit{TrbL-VirB6\_3}     & 0.66     & 0.10  & 0.57    \\
+      \textit{vif}               & 0.36     & 0.14  & 0.21    \\
+      \hline
+      \rule{0pt}{3ex}$\beta$-globin  & 1.00     & 0.00  & 1.00    \\
+      \textit{ccmF}              & 1.00     & 0.49  & 0.51    \\
+      \textit{ENAM}              & 0.53     & 0.43  & 0.10    \\
+      \textit{env}               & 0.51     & 0.27  & 0.24    \\
+      \textit{perM}              & 0.91     & 0.14  & 0.77    \\
+      \bottomrule
+    \end{tabular}
+    \label{tab:interval_widths_ps_sites}
+    \begin{tablenotes}
+      \small
+    \item The top genes represent \textit{irregular} estimation properties, the middle \textit{regular}, and the bottom genes are not categorized.
+    \end{tablenotes}
+  \end{threeparttable}
+\end{table}
+
+\clearpage
+
+\section*{Figures}
+
+\tikzstyle{line} = [draw,-stealth]
+\tikzstyle{block} = [draw=none]
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \node[block] (x) {\(\bm{x}\)};
+    \node[block,below of=x] (x2) {\(\bm{x}^{*2}\)};
+    \node[block,right of=x2] (dots1) {\(\dots\)};
+    \node[block,left of=x2,xshift=-1cm] (x1) {\(\bm{x}^{*1}\)};
+    \node[block,right of=dots1] (xB) {\(\bm{x}^{*B}\)};
+    \node[block,below of=x1] (t1) {\(\hat{\theta}^{*1}\)};
+    \node[block,below of=x2] (t2) {\(\hat{\theta}^{*2}\)};
+    \node[block,below of=dots1] (dots2) {\(\dots\)};
+    \node[block,below of=xB] (tB) {\(\hat{\theta}^{*B}\)};
+    \node[block,below of=t1,xshift=-3cm] (p1) {\(Pr_h(\omega>1|x_h,\hat{\theta}^{*1})\)};
+    \node[block,below of=t2] (p2) {\(Pr_h(\omega>1|x_h,\hat{\theta}^{*2})\)};
+    \node[block,right of=p2,xshift=1.5cm] (dots3) {\(\dots\)};
+    \node[block,below of=tB,xshift=3cm] (pB) {\(Pr_h(\omega>1|x_h,\hat{\theta}^{*B})\)};
+    \node[block,below of=p2,yshift=-1cm] (agg) {\(\sum_{b=1}^BPr_h(\omega>1|x_h,\hat{\theta}^{*b})/B\)};
+    \path[line] (x) -- (x1);
+    \path[line] (x) -- (x2);
+    \path[line] (x) -- (xB);
+    \path[line] (x1) -- (t1);
+    \path[line] (x2) -- (t2);
+    \path[line] (xB) -- (tB);
+    \path[line] (t1) -- (p1);
+    \path[line] (t2) -- (p2);
+    \path[line] (tB) -- (pB);
+    \path[line] (p1) -- (agg);
+    \path[line] (p2) -- (agg);
+    \path[line] (pB) -- (agg);
+  \end{tikzpicture}
+  \caption{Bootstrapping site patterns in a codon sequence alignment to classify selection pressure at codon sites.  From an alignment of protein coding DNA sequences, $\bm{x}$, with $n$ codon sites, site patterns are randomly sampled with replacement to obtain a bootstrap sample, $\bm{x}^{*b}$ with $n$ sites.  MLEs, $\hat{\theta}^{*b}$, are then estimated for bootstrap sample $\bm{x}^{*b}$.  Using $\hat{\theta}^{*b}$ and $\bm{x}$, the posterior probability $Pr_h(\omega>1|x_h,\hat{\theta}^{*b})$, that site $h$ is under positive selection is calculated.  These steps are repeated $B$ times to calculate $B$ sets of posterior probabilities.  An aggregate posterior probability that site $h$ is under positive selection is calculated by, for instance, averaging posterior probabilities over bootstrap replicates, $\sum_{b=1}^BPr_h(\omega>1|x_h,\hat{\theta}^{*b})/B$.}
+  \label{fig:bootstrap}
+\end{figure}
+
+\clearpage
+
+<<mles, echo=F>>=
+cat1.scheme4.5.taxa.m2a.mles <- read.csv('./data/cat1_scheme4_5_taxa_m2a_mles.csv',header=F)
+cat1.scheme4.5.taxa.m8.mles <- read.csv('./data/cat1_scheme4_5_taxa_m8_mles.csv',header=F)
+cat1.scheme1.5.taxa.m2a.mles <- read.csv('./data/cat1_scheme1_5_taxa_m2a_mles.csv',header=F)
+## remove rows with crazy large w2
+cat1.scheme1.5.taxa.m2a.mles <- cat1.scheme1.5.taxa.m2a.mles[-which(cat1.scheme1.5.taxa.m2a.mles[,7] > 15),]
+cat1.scheme1.5.taxa.m8.mles <- read.csv('./data/cat1_scheme1_5_taxa_m8_mles.csv',header=F)
+## remove rows with crazy large w+
+cat1.scheme1.5.taxa.m8.mles <- cat1.scheme1.5.taxa.m8.mles[-which(cat1.scheme1.5.taxa.m8.mles[,23] > 17),]
+## over bootstraps for a single simulated dataset
+cat1.scheme4.5.taxa.m2a.bs.4.mles <- read.csv('./data/cat1_scheme4_5_taxa_bs_4_m2a_mles_easy.csv',header=F)
+cat1.scheme4.5.taxa.m8.bs.73.mles <- read.csv('./data/cat1_scheme4_5_taxa_bs_73_m8_mles_easy.csv',header=F)
+cat1.scheme1.5.taxa.m2a.bs.86.mles <- read.csv('./data/cat1_scheme1_bs_86_m2a_mles_difficult.csv',header=F)
+cat1.scheme1.5.taxa.m8.bs.70.mles <- read.csv('./data/cat1_scheme1_bs_70_m8_mles_difficult.csv',header=F)
+@
+
+\begin{figure}[H]
+  \centering
+   \begin{subfigure}[t]{0.49\textwidth}\centering Simulated\end{subfigure}
+   \begin{subfigure}[t]{0.49\textwidth}\centering Bootstrap\end{subfigure}
+   \begin{subfigure}[t]{.01\textwidth}
+     \vspace{15 mm}
+     \rotatebox{90}{\textit{Regular}}
+   \end{subfigure}
+   \begin{subfigure}[t]{0.24\textwidth}
+     \centering
+     <<echo=F>>=
+     par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+     hist(cat1.scheme4.5.taxa.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+     axis(1,cex.axis=3,padj=1)
+     par(mar=c(4.5,1.5,2.8,4))
+     hist(cat1.scheme4.5.taxa.m2a.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+     axis(1,cex.axis=3,padj=1)
+     @
+     \caption{M2a}
+     \label{sfig:sim_M2a_easy}
+   \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(cat1.scheme4.5.taxa.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme4.5.taxa.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:sim_M8_easy}
+  \end{subfigure}
+   \begin{subfigure}[t]{0.24\textwidth}
+     \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(1-cat1.scheme4.5.taxa.m2a.bs.4.mles[,8]-cat1.scheme4.5.taxa.m2a.bs.4.mles[,9],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme4.5.taxa.m2a.bs.4.mles[,11],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:bs_M2a_easy}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(1-cat1.scheme4.5.taxa.m8.bs.73.mles[,8],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme4.5.taxa.m8.bs.73.mles[,11],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:bs_M8_easy}
+  \end{subfigure}
+  \par\bigskip
+  \begin{subfigure}[t]{.01\textwidth}
+    \vspace{12 mm}
+    \rotatebox{90}{\textit{Irregular}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(cat1.scheme1.5.taxa.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m2a.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:sim_M2a_diff}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(cat1.scheme1.5.taxa.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:sim_M8_diff}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(1-cat1.scheme1.5.taxa.m2a.bs.86.mles[,8]-cat1.scheme1.5.taxa.m2a.bs.86.mles[,9],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m2a.bs.86.mles[,11],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:bs_M2a_diff}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(1-cat1.scheme1.5.taxa.m8.bs.70.mles[,8],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m8.bs.70.mles[,11],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:bs_M8_diff}
+  \end{subfigure}
+  \caption{MLE distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters under M2a and M8.  Histograms are over 100 simulated (\subref{sfig:sim_M2a_easy},\subref{sfig:sim_M8_easy},\subref{sfig:sim_M2a_diff},\subref{sfig:sim_M8_diff}) and bootstrap (\subref{sfig:bs_M2a_easy},\subref{sfig:bs_M8_easy},\subref{sfig:bs_M2a_diff},\subref{sfig:bs_M8_diff}) datasets with the bootstrap datasets generated by sampling from one simulated dataset.  Data were simulated under \textit{regular} (\subref{sfig:sim_M2a_easy} - \subref{sfig:bs_M8_easy}) and \textit{irregular} (\subref{sfig:sim_M2a_diff} - \subref{sfig:bs_M8_diff}) conditions.\\ \\\textit{regular} simulation conditions: 5 taxa, $45\%$ $\omega=0$, $45\%$ $\omega=0.5$, and $10\%$ $\omega=5$\\ \textit{irregular} simulation conditions: 5 taxa, $100\%$ $\omega=1$}
+  \label{fig:mle_hists}
+\end{figure}
+
+\clearpage
+
+\begin{figure}[H]
+    \centering
+  \begin{subfigure}[t]{.49\textwidth}
+    \centering
+    \hspace{10 mm} \small{$50\%$ $\omega=1$, $50\%$ $\omega=1.5$}
+  \end{subfigure}
+  \begin{subfigure}[t]{.49\textwidth}
+    \centering
+    \hspace{10 mm} \small{$45\%$ $\omega=0$, $45\%$ $\omega=1$, $10\%$ $\omega=5$}
+  \end{subfigure}
+  \\[-2.6ex]
+  \begin{subfigure}[t]{.03\textwidth}
+    \vspace{8 mm}
+    \rotatebox{90}{\textit{\small{Mild Misspecification}} \hspace{4 mm} \textit{\small{Correct Model}}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.475\textwidth}
+    \centering
+    <<echo=F,warning=F>>=
+
+    c1s3.ft.fp     <- scan("./data/c1s3_opt_fp.csv",sep=',')
+    c1s3.ft.tp     <- scan("./data/c1s3_opt_tp.csv",sep=',')
+
+    c1s3m2a.beb.fp <- scan("./data/c1s3_m2a_beb_fp.csv",sep=',')
+    c1s3m2a.neb.fp <- scan("./data/c1s3_m2a_neb_fp.csv",sep=',')
+    c1s3m2a.sba.fp <- scan("./data/c1s3_m2a_sba_fp.csv",sep=',')
+    c1s3m2a.beb.tp <- scan("./data/c1s3_m2a_beb_tp.csv",sep=',')
+    c1s3m2a.neb.tp <- scan("./data/c1s3_m2a_neb_tp.csv",sep=',')
+    c1s3m2a.sba.tp <- scan("./data/c1s3_m2a_sba_tp.csv",sep=',')
+
+    c1s3m8.beb.fp  <- scan("./data/c1s3_m8_beb_fp.csv",sep=',')
+    c1s3m8.neb.fp  <- scan("./data/c1s3_m8_neb_fp.csv",sep=',')
+    c1s3m8.sba.fp  <- scan("./data/c1s3_m8_sba_fp.csv",sep=',')
+    c1s3m8.beb.tp  <- scan("./data/c1s3_m8_beb_tp.csv",sep=',')
+    c1s3m8.neb.tp  <- scan("./data/c1s3_m8_neb_tp.csv",sep=',')
+    c1s3m8.sba.tp  <- scan("./data/c1s3_m8_sba_tp.csv",sep=',')
+
+    c2s7.ft.fp     <- scan("./data/c2s7_opt_fp.csv",sep=',')
+    c2s7.ft.tp     <- scan("./data/c2s7_opt_tp.csv",sep=',')
+
+    c2s7m2a.beb.fp <- scan("./data/c2s7_m2a_beb_fp.csv",sep=',')
+    c2s7m2a.neb.fp <- scan("./data/c2s7_m2a_neb_fp.csv",sep=',')
+    c2s7m2a.sba.fp <- scan("./data/c2s7_m2a_sba_fp.csv",sep=',')
+    c2s7m2a.beb.tp <- scan("./data/c2s7_m2a_beb_tp.csv",sep=',')
+    c2s7m2a.neb.tp <- scan("./data/c2s7_m2a_neb_tp.csv",sep=',')
+    c2s7m2a.sba.tp <- scan("./data/c2s7_m2a_sba_tp.csv",sep=',')
+
+    c2s7m8.beb.fp  <- scan("./data/c2s7_m8_beb_fp.csv",sep=',')
+    c2s7m8.neb.fp  <- scan("./data/c2s7_m8_neb_fp.csv",sep=',')
+    c2s7m8.sba.fp  <- scan("./data/c2s7_m8_sba_fp.csv",sep=',')
+    c2s7m8.beb.tp  <- scan("./data/c2s7_m8_beb_tp.csv",sep=',')
+    c2s7m8.neb.tp  <- scan("./data/c2s7_m8_neb_tp.csv",sep=',')
+    c2s7m8.sba.tp  <- scan("./data/c2s7_m8_sba_tp.csv",sep=',')
+
+    thin <- floor(seq(1,length(c1s3.ft.fp),length=(length(c1s3.ft.fp)-1)/100))
+
+    fp <- c(c1s3.ft.fp[thin],c1s3m2a.neb.fp[thin],c1s3m2a.sba.fp[thin],c1s3m2a.beb.fp[thin])
+    fp <- c(fp,c1s3.ft.fp[thin],c1s3m8.neb.fp[thin],c1s3m8.sba.fp[thin],c1s3m8.beb.fp[thin])
+    fp <- c(fp,c2s7.ft.fp[thin],c2s7m2a.neb.fp[thin],c2s7m2a.sba.fp[thin],c2s7m2a.beb.fp[thin])
+    fp <- c(fp,c2s7.ft.fp[thin],c2s7m8.neb.fp[thin],c2s7m8.sba.fp[thin],c2s7m8.beb.fp[thin])
+
+    tp <- c(c1s3.ft.tp[thin],c1s3m2a.neb.tp[thin],c1s3m2a.sba.tp[thin],c1s3m2a.beb.tp[thin])
+    tp <- c(tp,c1s3.ft.tp[thin],c1s3m8.neb.tp[thin],c1s3m8.sba.tp[thin],c1s3m8.beb.tp[thin])
+    tp <- c(tp,c2s7.ft.tp[thin],c2s7m2a.neb.tp[thin],c2s7m2a.sba.tp[thin],c2s7m2a.beb.tp[thin])
+    tp <- c(tp,c2s7.ft.tp[thin],c2s7m8.neb.tp[thin],c2s7m8.sba.tp[thin],c2s7m8.beb.tp[thin])
+
+    roc.data <- data.frame(fp,tp,
+                               Method=rep(c("OPT","NEB","SBA","BEB"),
+                                              each=length(thin),times=4),
+                               Study=rep(c('Study 3 - M2a',
+                                               'Study 3 - M8',
+                                               'Study 7 - M2a',
+                                               'Study 7 - M8'),
+                                             each=length(thin)*4),
+                               Scenario=rep(c('CM','MM'),
+                                                each=length(thin)*8))
+
+    roc.plot <- ggplot(roc.data,aes(fp,tp)) +
+        coord_cartesian(xlim=c(-0.005,.405), ylim=c(-0.005,.405)) +
+        labs(x="False Positive Rate",y="True Positive Rate") +
+        geom_line(aes(color=Method,linetype=Method),size=1.2) +
+        geom_abline(slope=1,intercept=0,color='gray60') +
+        scale_color_manual(values=c("gray30","grey40","grey50","black")) +
+        scale_linetype_manual(values=c("dotted","dotdash","dashed","solid")) +
+        scale_x_continuous(breaks=c(0.1,0.2,0.3)) +
+        facet_wrap(~Study,ncol=2)
+
+    roc.plot +
+            theme(panel.margin=unit(0,"lines"),
+                  panel.background=element_blank(),
+                  strip.background=element_blank(),
+                  panel.grid.major=element_line(color="gray95"),
+                  legend.position="none",
+                  axis.line=element_line(colour="black"),
+                  text=element_text(size=20),
+                  panel.border = element_rect(colour = "black", fill=NA, size=1))
+@
+    \label{sfig:roc_hard}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    <<echo=F,warning=F>>=
+
+    c1s4.ft.fp     <- scan("./data/c1s4_opt_fp.csv",sep=',')
+    c1s4.ft.tp     <- scan("./data/c1s4_opt_tp.csv",sep=',')
+
+    c1s4m2a.beb.fp <- scan("./data/c1s4_m2a_beb_fp.csv",sep=',')
+    c1s4m2a.neb.fp <- scan("./data/c1s4_m2a_neb_fp.csv",sep=',')
+    c1s4m2a.sba.fp <- scan("./data/c1s4_m2a_sba_fp.csv",sep=',')
+    c1s4m2a.beb.tp <- scan("./data/c1s4_m2a_beb_tp.csv",sep=',')
+    c1s4m2a.neb.tp <- scan("./data/c1s4_m2a_neb_tp.csv",sep=',')
+    c1s4m2a.sba.tp <- scan("./data/c1s4_m2a_sba_tp.csv",sep=',')
+
+    c1s4m8.beb.fp <-  scan("./data/c1s4_m8_beb_fp.csv",sep=',')
+    c1s4m8.neb.fp <-  scan("./data/c1s4_m8_neb_fp.csv",sep=',')
+    c1s4m8.sba.fp <-  scan("./data/c1s4_m8_sba_fp.csv",sep=',')
+    c1s4m8.beb.tp <-  scan("./data/c1s4_m8_beb_tp.csv",sep=',')
+    c1s4m8.neb.tp <-  scan("./data/c1s4_m8_neb_tp.csv",sep=',')
+    c1s4m8.sba.tp <-  scan("./data/c1s4_m8_sba_tp.csv",sep=',')
+
+    c2s8.ft.fp  <-    scan("./data/c2s8_opt_fp.csv",sep=',')
+    c2s8.ft.tp  <-    scan("./data/c2s8_opt_tp.csv",sep=',')
+
+    c2s8m2a.beb.fp <- scan("./data/c2s8_m2a_beb_fp.csv",sep=',')
+    c2s8m2a.neb.fp <- scan("./data/c2s8_m2a_neb_fp.csv",sep=',')
+    c2s8m2a.sba.fp <- scan("./data/c2s8_m2a_sba_fp.csv",sep=',')
+    c2s8m2a.beb.tp <- scan("./data/c2s8_m2a_beb_tp.csv",sep=',')
+    c2s8m2a.neb.tp <- scan("./data/c2s8_m2a_neb_tp.csv",sep=',')
+    c2s8m2a.sba.tp <- scan("./data/c2s8_m2a_sba_tp.csv",sep=',')
+
+    c2s8m8.beb.fp <-  scan("./data/c2s8_m8_beb_fp.csv",sep=',')
+    c2s8m8.neb.fp <-  scan("./data/c2s8_m8_neb_fp.csv",sep=',')
+    c2s8m8.sba.fp <-  scan("./data/c2s8_m8_sba_fp.csv",sep=',')
+    c2s8m8.beb.tp <-  scan("./data/c2s8_m8_beb_tp.csv",sep=',')
+    c2s8m8.neb.tp <-  scan("./data/c2s8_m8_neb_tp.csv",sep=',')
+    c2s8m8.sba.tp <-  scan("./data/c2s8_m8_sba_tp.csv",sep=',')
+
+    thin <- floor(seq(1,length(c1s4.ft.fp),length=(length(c1s4.ft.fp)-1)/100))
+
+    fp <- c(c1s4.ft.fp[thin],c1s4m2a.neb.fp[thin],c1s4m2a.sba.fp[thin],c1s4m2a.beb.fp[thin])
+    fp <- c(fp,c1s4.ft.fp[thin],c1s4m8.neb.fp[thin],c1s4m8.sba.fp[thin],c1s4m8.beb.fp[thin])
+    fp <- c(fp,c2s8.ft.fp[thin],c2s8m2a.neb.fp[thin],c2s8m2a.sba.fp[thin],c2s8m2a.beb.fp[thin])
+    fp <- c(fp,c2s8.ft.fp[thin],c2s8m8.neb.fp[thin],c2s8m8.sba.fp[thin],c2s8m8.beb.fp[thin])
+
+    tp <- c(c1s4.ft.tp[thin],c1s4m2a.neb.tp[thin],c1s4m2a.sba.tp[thin],c1s4m2a.beb.tp[thin])
+    tp <- c(tp,c1s4.ft.tp[thin],c1s4m8.neb.tp[thin],c1s4m8.sba.tp[thin],c1s4m8.beb.tp[thin])
+    tp <- c(tp,c2s8.ft.tp[thin],c2s8m2a.neb.tp[thin],c2s8m2a.sba.tp[thin],c2s8m2a.beb.tp[thin])
+    tp <- c(tp,c2s8.ft.tp[thin],c2s8m8.neb.tp[thin],c2s8m8.sba.tp[thin],c2s8m8.beb.tp[thin])
+
+
+    roc.data <- data.frame(fp,tp,
+                               Method=rep(c("OPT","NEB","SBA","BEB"),
+                                              each=length(thin),times=4),
+                               Study=rep(c('Study 4 - M2a',
+                                               'Study 4 - M8',
+                                               'Study 8 - M2a',
+                                               'Study 8 - M8'),
+                                             each=length(thin)*4),
+                               Scenario=rep(c('CM','MM'),
+                                                each=length(thin)*8))
+
+    roc.plot <- ggplot(roc.data,aes(fp,tp)) +
+        coord_cartesian(xlim=c(-0.005,.1),ylim=c(-0.005,.805)) +
+        labs(x="False Positive Rate",y="True Positive Rate") +
+        geom_line(aes(color=Method,linetype=Method),size=1.2) +
+        geom_abline(slope=1,intercept=0,color='gray60') +
+        scale_shape_manual(values=c(15,18,17,16)) +
+        scale_color_manual(values=c("gray30","grey40","grey50","black")) +
+        scale_linetype_manual(values=c("dotted","dotdash","dashed","solid")) +
+        scale_x_continuous(breaks=c(0.02,0.04,0.06,0.08)) +
+        guides(colour = guide_legend(override.aes = list(size=1.4))) +
+        facet_wrap(~Study,ncol=2)
+
+    roc.plot +
+        theme(panel.background=element_blank(),
+              strip.background=element_blank(),
+              panel.grid.major=element_line(colour="gray95"),
+              panel.margin=unit(0,"lines"),
+              axis.line=element_line(colour="black"),
+              legend.title=element_blank(),
+              legend.key=element_rect(fill="transparent"),
+              legend.position=c(.84,.80),
+              legend.key.width=unit(6,"line"),
+              text=element_text(size=20),
+              panel.border = element_rect(colour = "black", fill=NA, size=1))
+@
+    \label{sfig:roc_easy}
+  \end{subfigure}
+  \caption[ROC Curves.]{ROC curves for the detection of sites under positive selection for BEB, NEB, and SBA analyses of data generated under two different simulation scenarios: without model misspecification (\textit{Correct Model}, studies 3 and 4) and with mild model misspecification (\textit{Mild Misspecification}, studies 7 and 8).  The data were simulated using a 5-taxon tree topology.  In studies 3 and 7, $50\%$ of the sites were simulated under neutral evolution ($\omega=1$) and $50\%$ of the sites under positive selection ($\omega=1.5$).  In studies 4 and 8, $45\%$ of the sites were simulated under purifying selection ($\omega=0$), $45\%$ under neutral evolution ($\omega=1$) and $10\%$ under positive selection ($\omega=5$).  Each plot includes a line for the lower bound (y=x) and an expected upper bound (OPT) when classification is made using the generating model parameters.  Curves for NEB do not always cover the whole range of false positive rates, because NEB sometimes estimates the $\omega$ distribution with all mass on $\omega > 1$.  In these cases, even with a posterior probability cut-off of 1, NEB still incorrectly classifies sites to be under positive selection.}
+  \label{fig:roc}
+\end{figure}
+
+\clearpage
+
+<<ROC_30_data,echo=F>>=
+c1s3.30.ft.fp  <-    scan("./data/c1s3_30t_opt_fp.csv",sep=',')
+c1s3.30.ft.tp  <-    scan("./data/c1s3_30t_opt_tp.csv",sep=',')
+
+c1s3m2a.30.beb.fp <- scan("./data/c1s3_30t_m2a_beb_fp.csv",sep=',')
+c1s3m2a.30.neb.fp <- scan("./data/c1s3_30t_m2a_neb_fp.csv",sep=',')
+c1s3m2a.30.sba.fp <- scan("./data/c1s3_30t_m2a_sba_fp.csv",sep=',')
+
+c1s3m2a.30.beb.tp <- scan("./data/c1s3_30t_m2a_beb_tp.csv",sep=',')
+c1s3m2a.30.neb.tp <- scan("./data/c1s3_30t_m2a_neb_tp.csv",sep=',')
+c1s3m2a.30.sba.tp <- scan("./data/c1s3_30t_m2a_sba_tp.csv",sep=',')
+
+thin <- floor(seq(1,length(c1s3.30.ft.fp),length=(length(c1s3.30.ft.fp)-1)/100))
+
+fp <- c(c1s3.30.ft.fp[thin],c1s3m2a.30.neb.fp[thin],c1s3m2a.30.sba.fp[thin],c1s3m2a.30.beb.fp[thin])
+tp <- c(c1s3.30.ft.tp[thin],c1s3m2a.30.neb.tp[thin],c1s3m2a.30.sba.tp[thin],c1s3m2a.30.beb.tp[thin])
+
+roc.data <- data.frame(fp,tp,
+                       Method=rep(c("OPT","NEB","SBA","BEB"),each=length(thin)))
+
+title <- expression(paste("Study 3 (50% ",omega,"=1.0 50% ",omega,"=15) - 30 taxa - M2a"))
+
+roc.plot <- ggplot(roc.data,aes(fp,tp)) +
+    ggtitle(title) +
+    geom_line(aes(color=Method,linetype=Method),size=1.2) +
+    coord_cartesian(xlim=c(-0.005,.301), ylim=c(-0.005,.301)) +
+    labs(x="False Positive Rate",y="True Positive Rate") +
+    geom_abline(slope=1,intercept=0,color='gray60') +
+    scale_shape_manual(values=c(15,18,17,16)) +
+    scale_color_manual(values=c("gray30","grey40","grey50","black")) +
+    scale_linetype_manual(values=c("dotted","dotdash","dashed","solid"))
+@
+
+\begin{figure}[H]
+    \centering
+    <<echo=F>>=
+    roc.plot +
+        theme(plot.title=element_text(size=18),
+              panel.background=element_blank(),
+              panel.margin=unit(2,"lines"),
+              panel.grid.major=element_line(color="gray95"),
+              legend.title=element_blank(),
+              legend.position=c(0.88,0.65),
+              legend.key=element_rect(fill = "transparent"),
+              legend.key.width = unit(4,"line"),
+              axis.line=element_line(colour="black"),
+              panel.border = element_rect(colour = "black", fill=NA, size=1))
+    @
+    \caption[ROC 30 taxa]{ROC curves for the detection of sites under positive selection for BEB, NEB, and SBA analyses of data generated under \textit{Correct Model}, study 3 ($50\%$ $\omega=1$, $50\%$ $\omega=1.5$).  The data were simulated using a 30-taxon tree topology. The plot includes a curve for the lower bound (y=x) and an expected upper bound (OPT) when classification is made using the generating model parameters.  The curves for NEB do not always cover the whole range of false positive rates, because NEB sometimes estimates the $\omega$ distribution with all mass on $\omega > 1$.  In these cases, even with a posterior probability cut-off of 1, NEB still incorrectly classifies sites to be under positive selection.}
+    \label{fig:roc_30_taxa}
+\end{figure}
+
+<<lysin,echo=F>>=
+lysin.m2a.params <- read.csv("./real_data_results/mles/lysin_m2a_mles.csv",header=F)
+lysin.m2a.omegas <- c(as.matrix(lysin.m2a.params[,5:7]))
+lysin.m2a.omegas.order <- order(lysin.m2a.omegas)
+lysin.m2a.omegas <- lysin.m2a.omegas[lysin.m2a.omegas.order]
+lysin.m2a.ps.cumsum <- cumsum(c(as.matrix(lysin.m2a.params[,2:4]))[lysin.m2a.omegas.order])
+
+lysin.m8.params <- read.csv("./real_data_results/mles/lysin_m8_mles.csv",header=F)
+@
+
+<<CDH3,echo=F>>=
+CDH3.m2a.params <- read.csv("./real_data_results/mles/CDH3_m2a_mles.csv",header=F)
+CDH3.m2a.omegas <- c(as.matrix(CDH3.m2a.params[,5:7]))
+CDH3.m2a.omegas.order <- order(CDH3.m2a.omegas)
+CDH3.m2a.omegas <- CDH3.m2a.omegas[CDH3.m2a.omegas.order]
+CDH3.m2a.ps.cumsum <- cumsum(c(as.matrix(CDH3.m2a.params[,2:4]))[CDH3.m2a.omegas.order])
+
+CDH3.m8.params <- read.csv("./real_data_results/mles/CDH3_m8_mles.csv",header=F)
+@
+
+\clearpage
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(lysin.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(lysin.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:lysin_m2a_mles}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(lysin.m8.params[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    axis(1,cex.axis=3,padj=1)
+    hist(lysin.m8.params[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:lysin_m8_mles}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(CDH3.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:CDH3_m2a_mles}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m8.params[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m8.params[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:CDH3_m8_mles}
+  \end{subfigure}
+  \caption{MLE distributions over bootstrap datasets for the lysin and \textit{CDH3} genes.  The distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters associated with positive selection were estimated under models M2a and M8 for each of 100 bootstrap datasets.}
+  \label{fig:hists_lysin_CDH3_mles}
+\end{figure}
+
+\clearpage
+
+\section*{\large Supplementary Material}
+
+\setcounter{table}{0}
+\makeatletter
+\renewcommand{\thetable}{S\@arabic\c@table}
+\makeatother
+
+\setcounter{figure}{0}
+\makeatletter
+\renewcommand{\thefigure}{S\@arabic\c@figure}
+\makeatother
+
+\setcounter{page}{1}
+
+\singlespacing
+
+\noindent \textbf{\large Smoothed Bootstrap Aggregation for Assessing Selection Pressure at Amino Acid Sites}
+\vskip 4mm
+\noindent {\small Joseph Mingrone,$^{*,2,3}$ Edward Susko,$^{2,3}$ Joseph Bielawski$^{1,2,3}$}\\
+\textit{\scriptsize $^1$Department of Biology, Dalhousie University, Halifax, NS, Canada\\
+$^2$Department of Mathematics and Statistics,Dalhousie University, Halifax, NS, Canada\\
+$^3$Centre for Comparative Genomics and Evolutionary Bioinformatics, Dalhousie University, Halifax, NS, Canada\\
+\textbf{*Corresponding Author:} E-mail: jrm@mathstat.dal.ca}
+
+\vspace{3cm}
+\contentsline {section}{\numberline {}Contents}{}
+\vspace{.2cm}
+\contentsline {subsection}{\numberline {}Section                S1:  Optimality of ROC curve using true mixing distribution}{2}
+\contentsline {subsection}{\numberline {}Section                S2:  SBA Branch-Site Model A - Analysis of \textit{NR1D1}}{5}
+\contentsline {subsection}{\numberline {}Table   \hspace{1.8mm} S1:  False positive rates after LRT}{7}
+\contentsline {subsection}{\numberline {}Table   \hspace{1.8mm} S2:  Analysis of the \textit{tax} gene}{8}
+\contentsline {subsection}{\numberline  {}Figure \hspace{.2mm}  S1:  MLE histograms after LRT}{9}
+\contentsline {subsection}{\numberline  {}Figure \hspace{.2mm}  S2:  MLE bootstrap histograms}{10}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S3:  MLE histograms over 10,000 bootstrap samples}{11}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S4:  Simplex plots illustrating smoothing of model M2a $p$-parameters}{12}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S5:  MLE histograms for 30-taxon tree}{13}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S6:  MLE histograms with and without misspecification}{14}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S7:  ROC curves after pre-screening with LRT}{15}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S8:  MLE histograms for real data under model M2a}{16}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S9:  MLE histograms for real data under model M2a}{17}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S10: MLE histograms for real data under model M2a}{18}
+\contentsline {subsection}{\numberline {}Figure  \hspace{.2mm}  S11: MLE histograms for real data under model M8}{19}
+
+\clearpage
+
+\subsection*{Optimality of ROC curve using the true mixing distribution} \label{subsec:sub_roc_opt}
+\setcounter{equation}{0}
+\begingroup
+\fontsize{11pt}{11pt}\selectfont
+We establish here that the ROC curve using posterior probabilities calculated with the true distribution of $\omega$ across sites is optimal in the sense that for any $x$-axis value, its $y$-axis value is always the largest attainable. The result is a consequence of the Neyman-Pearson Lemma (Neyman and Pearson 1933) which was used to establish optimality of likelihood ratio tests in the case of simple null and alternative hypotheses where all parameters of the model are known. 
+
+For a given site, let $\phi(X,W)$ denote a test for positive selection at that site. Specifically, $\phi(X,W)=1$ when the test finds in favour of positive selection and is 0 otherwise. It depends on $X,$ which represents the data at the site and possibly on random $W,$ independent of the data at the site; for all tests considered in the paper, $W$ is data from all other sites. For instance, the test, $\phi_1(X)$, using posterior probabilities calculated with the true distribution of $\omega$, uses only the data at the site and sets $\phi_1^{(k)}(X)=1$ if $P(\omega>1|X) > k$ for threshold $k$. In obtaining the ROC curve, each choice of $k$ gives a different false positive rate (the $x$-axis value). The true positive rate for a given $k$ is the corresponding $y$-value. Since 
+\[P(\omega > 1 | X) > k \Longleftrightarrow \frac{p(X|\omega > 1) P(\omega > 1)}{ p(X|\omega > 1) P(\omega > 1) + p(X|\omega \le 1 ) P(\omega \le 1) } > k, \]
+a brief argument can be given to show that the test rejects when 
+\begin{equation}
+  \label{eq:roc-opt0}
+  p(X|\omega > 1) P(\omega > 1) / \{p(X|\omega \le 1 )P(\omega \le 1)\} > c.
+\end{equation}
+where to simplify notation we set $c=[1/k-1]^{-1}>0$. We denote this test as $\phi_1^{(c)}$.
+
+The ROC curve for $\phi_1^{(c)}$ is optimal if, for any other test, $\phi_0^{(t)}$, the $y$-axis value (true positive rate) for $\phi_1^{(c)}$ at least as large as that of $\phi_0^{(t)}$ whenever the $x$-axis values (false positive rates) for the two tests are the same. Much like with codon frequencies, which can refer to observed or population frequencies, the ROC curve for a test sometimes refers to the random quantity that varies from data set to data set depending upon the number of true and false positives for that data set. According to this definition it is impossible to guarantee that $\phi_1^{(c)}$ always gives a uniformly better ROC curve. For instance, there is always some small probability of unusual data sets where the positively selected sites show only synonymous changes, in which case even poor tests may give better ROC curves. The population version of an ROC curve refers to the curve with the limiting proportions of false positives on the $x$-axis and true positives on the $y$-axis; values that can be approximated by averaging over many simulated data sets. It is for the population version of the ROC curve that the optimality property holds. 
+
+The limiting false positive rate of $\phi_1^{(c)}$, is the same as $\phi_0^{(t)}$, if $c$ and $t$ are chosen so that 
+\begin{equation}
+  \label{eq:roc-opt1}
+  P(\phi_1^{(c)}(X)=1,\omega \le 1)=P(\phi_0^{(t)}(X,W)=1,\omega \le 1). 
+\end{equation}
+We wish to show that when (\ref{eq:roc-opt1}) holds, meaning that the x-axis values of the ROC curve are the same, the probability of a true positive for $\phi_1^{(c)}$ (y-axis value) is at least as large as that of $\phi_0^{(t)}$:
+\begin{equation}
+  \label{eq:roc-opt2}
+  P(\phi_1^{(c)}(X)=1 , \omega > 1) - P(\phi_0^{(t)}(X,W)=1 , \omega > 1) \ge 0
+\end{equation}
+In using the Neyman-Pearson Lemma, it is convenient to express the true positive probability as an expectation of an indicator function. For any event, $A$, $P(A)=E[I\{A\}]$ where $I\{A\}$ is 1 or 0 depending upon whether $A$ is true or not. Since $\phi_1^{(c)}(X)I\{\omega>1\}=1$ or 0, according to whether the event $\phi_1^{(c)}(X)=1, \omega > 1$ holds or not, we get that (\ref{eq:roc-opt2}) can be expressed as
+\begin{equation}
+  \label{eq:roc-opt3}
+  E[\phi_1^{(c)}(X)I\{\omega > 1\}] - E[ \phi_1^{(t)}(X,W)I\{\omega > 1\}] \ge 0
+\end{equation}
+As a final simplification, let $\phi_0^{(*t)}(X)=E[\phi_0^{(t)}(X,W)|X]$. Then 
+\begin{eqnarray}
+  \nonumber
+  E[\phi_0^{(t)}(X,W) I\{\omega > 1\}] &=& E[E[\phi_0^{(t)}(X,W) I\{\omega > 1\}|X]] \\
+  \label{eq:roc-opt4}
+                                       &=& E[I\{\omega > 1\} E[\phi_0^{(t)}(X,W)]|X]] = E[I\{\omega > 1\} \phi_0^{(*t)}(X)].
+\end{eqnarray}
+Substituting (\ref{eq:roc-opt4}) in (\ref{eq:roc-opt3}), we obtain that $\phi_1^{(c)}$ is optimal $\phi_0^{(t)}$ if
+\begin{equation}
+  \label{eq:roc-opt5}
+  E[\phi_1^{(c)}(X)I\{\omega > 1\}] - E[\phi_0^{(*t)}(X)I\{\omega > 1\} ] \ge 0.
+\end{equation}
+whenever (\ref{eq:roc-opt1}) holds. With this simplification the result follows immediately from the proof of the Neyman-Pearson Lemma as we now show. 
+\begin{eqnarray}
+  \nonumber
+  E[\phi_1^{(c)}(X) I\{\omega > 1\}-\phi_0^{(*t)}(X) I\{\omega > 1\}] &=& \sum_{x, \omega'} \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\} I\{\omega' > 1\} P(X=x, \omega = \omega') \\
+  \nonumber
+                                                                      &=& \sum_{x} \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\} \sum_{\omega'>1}  P(X=x, \omega = \omega')\\
+  \nonumber
+                                                                      &=& \sum_{x} \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\} P(X=x,\omega > 1) \\
+  \label{eq:roc04}
+                                                                      &=& \sum_{x} \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}p(x|\omega > 1) P(\omega > 1).
+\end{eqnarray}
+
+For any $x$ such that the test $\phi_0^{(c)}(x)$ rejects, by (\ref{eq:roc-opt0}) 
+\begin{equation}
+  \label{eq:roc-opt5a}
+  p(x|\omega > 1) P(\omega > 1)> c p(x|\omega \le 1 ) P(\omega \le 1)
+\end{equation}
+Since $0\le \phi_0^{(*t)}(x)\le 1$ and since the test rejects when $\phi_1^{(c)}(x)=1$
+\begin{equation}
+  \label{eq:roc-opt6}
+  \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}=1-\phi_0^{(*t)}(x)\ge 0. 
+\end{equation}
+Combining (\ref{eq:roc-opt5a})-(\ref{eq:roc-opt6}) gives that
+\begin{equation}
+  \label{eq:roc05}
+  \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}p(x|\omega > 1) p(\omega > 1)\ge  c     \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}p(x|\omega \le 1 ) p(\omega \le 1)
+\end{equation}
+Consider now $x$ such that $\phi_0^{(c)}$ does not reject. Then
+\begin{equation}
+  \label{eq:roc-opt7}
+  p(x|\omega > 1) P(\omega > 1)\le c p(x|\omega \le 1 ) P(\omega \le 1)
+\end{equation}
+and since $\phi_0^{(*t)}(x)\ge 0$ and $\phi_1^{(c)}(x)=0$,
+\begin{equation}
+  \label{eq:roc-opt8}
+  \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}=-\phi_0^{(*t)}(x)\le 0. 
+\end{equation}
+Combining (\ref{eq:roc-opt7})-(\ref{eq:roc-opt8}) gives (\ref{eq:roc05}). In short, (\ref{eq:roc05}) is satisfied for all $x$. Substituting in (\ref{eq:roc04}),
+\begin{eqnarray}
+  \label{eq:roc-opt8a}
+  E[\phi_1^{(c)}(X) I\{\omega > 1\}-\phi_0^{(*t)}(X) I\{\omega > 1\}] &\ge& c \sum_{x} \{\phi_1^{(c)}(x) - \phi_0^{(*t)}(x)\}p(x|\omega \le 1 ) p(\omega \le 1)
+\end{eqnarray}
+
+Now
+\begin{eqnarray}
+  \nonumber
+  \sum_{x} \phi_1^{(c)}(x) p(x|\omega \le 1 ) p(\omega \le 1)
+  &=& \sum_{x} \phi_1^{(c)}(x) P(X=x,\omega\le 1) \\
+  \nonumber
+  &=& \sum_{x,\omega\le 1} \phi_1^{(c)}(x) p(x,\omega)\\
+  \label{eq:roc-opt9}
+  &=& \sum_{x|\phi_1^{(c)}(x)=1, \omega\le 1}p(x,\omega)
+      = P(\phi_1^{(c)}(X)=1,\omega \le 1)
+\end{eqnarray}
+Similarly,
+\begin{equation}
+  \label{eq:roc-opt10}
+  \sum_{x} \phi_0^{(*t)}(x)p(x|\omega \le 1 ) p(\omega \le 1) = P(\phi_0^{(t)}(X)=1,\omega \le 1)
+\end{equation}
+Substituting (\ref{eq:roc-opt9})-(\ref{eq:roc-opt10}) in (\ref{eq:roc-opt8a}) and using (\ref{eq:roc-opt1}) gives the desired result that
+\begin{eqnarray}
+  \nonumber
+  E[\phi_1^{(c)}(X) I\{\omega > 1\}-\phi_0^{(*t)}(X) I\{\omega > 1\}] &\ge& c \{P(\phi_1^{(c)}(X)=1,\omega \le 1) - P(\phi_0^{(t)}(X)=1,\omega \le 1)\} =0
+\end{eqnarray}
+\endgroup
+
+\clearpage
+
+\subsection*{SBA Branch-Site Model A - Analysis of \textit{NR1D1}} \label{subsec:sba_modelA}
+SBA for branch-site codon model A (Zhang et al., 2005) was implemented to demonstrate the feasibility of SBA implementations for new models.  The new implementation, which was completed within a few hours, can be found at https://github.com/Jehops/codeml\_sba.  The nuclear receptor gene, \textit{NR1D1} (Baker et al. 2016), was analyzed under NEB, BEB, and SBA methods.  The branch-site test of positive selection on the foreground branch leading to the human lineage was rejected at the 1\% level (LRT test statistic: 10.26612, p-value: 0.00135).  The MLEs of the $\omega$-distribution parameters are shown in table S2-1.  Because the estimated weights of the positive selection classes are very small, the estimates of $\omega>1$ were unreasonable.
+
+Under both NEB and BEB, the same site had a posterior probably of positive selection larger than 0.99, whereas the posteriors were well below 0.5 for all other sites.  On the other hand, the mean posterior under SBA for the same site was 0.879.  Plots of the maximum likelihood estimates (MLES) of the $\omega$-distribution parameters are shown in figure S2-1.
+
+\begin{table}[H]
+  \caption*{Table S2-1: Estimates of the $\omega$-distribution parameters for the \textit{NR1D1} gene under branch-site model A.}
+  \centering
+  \begin{tabular}[h!]{*{5}l}
+    \toprule
+    Site Class          & 0       & 1       & 2a        & 2b \\
+    \cmidrule(lr){1-1} \cmidrule(lr){2-2} \cmidrule(lr){3-3} \cmidrule(lr){4-4} \cmidrule(lr){5-5}
+    weight              & 0.95058 & 0.04751 & 0.00183   & 0.00009 \\
+    background $\omega$ & 0.03702 & 1.00000 & 0.03702   & 1.00000 \\
+    foreground $\omega$ & 0.03702 & 1.00000 & 999.00000 & 999.00000 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\clearpage
+
+\begin{figure}[H]
+  \centering
+      <<echo=F>>=
+    nr2c1.pp <- read.csv("./data/nr2c1_modelA_sba_foreground_branches_ps.csv", header=F)
+    site.mean.pp <- as.vector(apply(nr2c1.pp,2,mean))
+    nr2c1.params <- read.csv("./data/nr2c1_modelA_params.csv", header=F)
+    nr2c1.smoothed.params <- read.csv("./data/nr2c1_modelA_smoothed_params.csv", header=F)
+
+    p0 <- nr2c1.params[,dim(nr2c1.params)[2]-3]
+    p1 <- nr2c1.params[,dim(nr2c1.params)[2]-2]
+    p2 <- (1-p0-p1)*p0/(p0+p1) + (1-p0-p1)*p1/(p0+p1)
+
+    w0 <- nr2c1.params[,dim(nr2c1.params)[2]-1]
+    w2 <- nr2c1.params[,dim(nr2c1.params)[2]]
+
+    p0.s <- nr2c1.smoothed.params[,dim(nr2c1.smoothed.params)[2]-3]
+    p1.s <- nr2c1.smoothed.params[,dim(nr2c1.smoothed.params)[2]-2]
+    p2.s <- (1-p0.s-p1.s)*p0.s/(p0.s+p1.s) + (1-p0.s-p1.s)*p1.s/(p0.s+p1.s)
+    par(mfrow=c(3,3),mar=c(4,1,2,1))
+    hist(p0,main='',breaks=5,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(p[omega<1]))
+    hist(p1,main='',breaks=5,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(p[omega==1]))
+    hist(p2,main='',breaks=5,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(p[omega>1]))
+    hist(p0.s,main='',breaks=5,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(paste(p[omega<1],' (smoothed)')))
+    hist(p1.s,main='',breaks=5,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(paste(p[omega==1],' (smoothed)')))
+    hist(p2.s,main='',breaks=7,cex.lab=1.5,yaxt='n',ylab='',xlab=expression(paste(p[omega>1],' (smoothed)')))
+    hist(w0,main='',cex.lab=1.5,yaxt='n',ylab='',xlab=expression(omega['<1']))
+    frame()  ## empty plot
+    hist(w2,main='',cex.lab=1.5,yaxt='n',ylab='',xlab=expression(omega['>1']))
+        @
+\caption*{Fig. S2-1: Branch-site model A $\omega$ distribution parameter estimates over bootstrap samples.  A bandwidth parameter of 0.4 was used to smooth the $p$ estimates.}
+\end{figure}
+
+\clearpage
+
+\begin{table}[H]
+  \caption[False positive rates after LRT.]{False positive rates for each simulation study after application of the likelihood ratio (LR) test.  The \textit{LR Test} column lists the proportion of significant tests.  False positive rates are only included when they differ from the corresponding rates without the LR Test.  All rates under BEB and SBA remained the same with and without the LR test.  Values in parentheses denote the change in the rate after applying the LR Test.  A posterior probability threshold of 0.95 was used for classifying sites to be under positive selection.}
+  \centering
+  \begin{tabular}[h!]{*{3}l*{4}c}
+    \toprule
+    Study              & Misspecification   & $\omega$ distribution  & \multicolumn{2}{c}{LR Test}               & \multicolumn{2}{c}{NEB}                       \\
+    \cmidrule(lr){1-1} \cmidrule(lr){2-2}   \cmidrule(lr){3-3}       \cmidrule(lr){4-5}                      \cmidrule(lr){6-7}                      
+                       &                    &                        & M2a  & M8                             & M2a                   & M8                    \\
+                                                                       \cmidrule(lr){4-4} \cmidrule(lr){5-5}   \cmidrule(lr){6-6}      \cmidrule(lr){7-7} 
+    1                  & None               & 100\% 1                & 0.10 & 0.09                           & \textbf{0.05} (-0.29) & 0.04 (-0.31)          \\
+    2                  & None               & 50\% 0.5, 50\% 1       & 0.08 & 0.17                           &                       &                       \\
+    3                  & None               & 50\% 1 50\% 1.5        & 0.94 & 0.94                           & \textbf{0.33} (-0.02) & \textbf{0.35} (-0.02) \\
+    4                  & None               & 45\% 0, 45\% 1, 10\% 5 & 1.00 & 1.00                           &                       &                       \\
+    \\                                                                          
+    5                  & Mild               & 100\% 1                & 0.23 & 1.00                           &                       &                       \\
+    6                  & Mild               & 50\% 0.5, 50\% 1       & 0.13 & 1.00                           &                       &                       \\
+    7                  & Mild               & 50\% 1, 50\% 1.5       & 0.92 & 1.00                           & \textbf{0.26} (-0.04) &                       \\
+    8                  & Mild               & 45\% 0, 45\% 1, 10\% 5 & 1.00 & 1.00                           &                       &                       \\
+    \\                                                                          
+    9                  & Heavy              & 100\% 1                & 1.00 & 0.00                           &                       &                       \\
+    10                 & Heavy              & 50\% 0.5, 50\% 1       & 0.71 & 0.74                           & \textbf{0.36} (-0.17) & \textbf{0.38} (-0.12) \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:simlrt}
+\end{table}
+
+\clearpage
+
+ \begin{table}[h!]
+  \caption{Analysis of the \emph{tax} Gene.  Shown are the estimated total tree lengths (TL), maximum likelihood parameters (MLEs), -log likelihoods (-lnL), and the range of site posterior probabilities (Pr) under models M2a and M8 using BEB and SBA to classify sites.  The range of posterior probabilities are shown for three categories of sites: invariant, single synonymous substitution (SSS), and single nonsynonymous subsitution (SNS).}
+  \centering
+  \begin{tabular}[!ht]{*{3}l}
+    \toprule
+                                                  & \multicolumn{1}{c}{M2a}             & \multicolumn{1}{c}{M8}              \\
+    \cmidrule(lr){2-2} \cmidrule(lr){3-3}
+    TL                                            & 0.128                               & 0.128                               \\
+    MLEs                                          & $p_{\omega>1}=1.0$, $\omega_{>1}=4.87$ & $p_{\omega>1}=1.0$, $\omega_{>1}=4.87$ \\
+    -lnL                                          & 892.0                               & 892.0                               \\
+    \underline{Invariant Sites} (159)             &                                     &                                     \\
+    \multicolumn{1}{r}{\hspace{2 mm}BEB Pr Range} & $0.552,0.607$                       & $0.689,0.732$                       \\
+    \multicolumn{1}{r}{SBA Pr Range}              & $0.543,0.596$                       & $0.761,0.799$                       \\
+    \underline{SSS Sites} (2)                     &                                     &                                     \\
+    \multicolumn{1}{r}{BEB Pr Range}              & $0.589,0.590$                       & $0.718,0.719$                       \\
+    \multicolumn{1}{r}{SBA Pr Range}              & $0.578,0.579$                       & $0.787,0.787$                       \\
+    \underline{SNS Sites} (21)                    &                                     &                                     \\
+    \multicolumn{1}{r}{BEB Pr Range}              & $0.911,0.927$                       & $0.961,0.968$                       \\
+    \multicolumn{1}{r}{SBA Pr Range}              & $0.871,0.892$                       & $0.990,0.991$                       \\
+    \bottomrule
+  \end{tabular}
+  \label{tab:tax}
+\end{table}
+
+\clearpage
+
+<<mles-filtered, echo=F>>=
+cat1.scheme4.5.taxa.m2a.mles <- read.csv('./data/cat1_scheme4_5_taxa_m2a_mles.csv',header=F)
+cat1.scheme4.5.taxa.m8.mles <- read.csv('./data/cat1_scheme4_5_taxa_m8_mles.csv',header=F)
+cat1.scheme1.5.taxa.m2a.mles <- read.csv('./data/cat1_scheme1_5_taxa_m2a_mles.csv',header=F)
+## remove rows with crazy large w2
+cat1.scheme1.5.taxa.m2a.mles <- cat1.scheme1.5.taxa.m2a.mles[-which(cat1.scheme1.5.taxa.m2a.mles[,7] > 15),]
+cat1.scheme1.5.taxa.m8.mles <- read.csv('./data/cat1_scheme1_5_taxa_m8_mles.csv',header=F)
+## remove rows with crazy large w+
+cat1.scheme1.5.taxa.m8.mles <- cat1.scheme1.5.taxa.m8.mles[-which(cat1.scheme1.5.taxa.m8.mles[,23] > 17),]
+## over bootstraps for a single simulated dataset
+cat1.scheme4.5.taxa.m2a.bs.4.mles <- read.csv('./data/cat1_scheme4_5_taxa_bs_4_m2a_mles_easy.csv',header=F)
+cat1.scheme4.5.taxa.m8.bs.73.mles <- read.csv('./data/cat1_scheme4_5_taxa_bs_73_m8_mles_easy.csv',header=F)
+cat1.scheme1.5.taxa.m2a.bs.86.mles <- read.csv('./data/cat1_scheme1_bs_86_m2a_mles_difficult.csv',header=F)
+cat1.scheme1.5.taxa.m8.bs.70.mles <- read.csv('./data/cat1_scheme1_bs_70_m8_mles_difficult.csv',header=F)
+@
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.49\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(cat1.scheme1.5.taxa.m2a.mles[c(15,19,39,59,67,69,81,86,90,92),4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m2a.mles[c(15,19,39,59,67,69,81,86,90,92),7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M2a}
+    \label{sfig:sim_M2a_diff_filter}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.49\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(cat1.scheme1.5.taxa.m8.mles[c(15,39,59,69,75,81,86,90,92),12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(cat1.scheme1.5.taxa.m8.mles[c(15,39,59,69,75,81,86,90,92),23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{M8}
+    \label{sfig:sim_M8_diff_filter}
+  \end{subfigure}
+  \caption{MLE distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters under M2a and M8.  Histograms are over simulated datasets for which the null hypothesis of no positive selection was rejected by a likelihood ratio test (10 of 100 under M2a and 9 of 100 under M8).  Data were simulated under \textit{irregular} conditions: 5 taxa, $100\%$ $\omega=1$.}
+  \label{fig:hists-cat1-scheme1-filter}
+\end{figure}
+
+\clearpage
+
+\begin{figure}[H]
+  \centering
+   \begin{subfigure}[t]{0.49\textwidth}\centering Simulated\end{subfigure}
+   \begin{subfigure}[t]{0.49\textwidth}\centering Bootstrap\end{subfigure}
+   \begin{subfigure}[t]{.01\textwidth}
+     \vspace{15 mm}
+     \rotatebox{90}{\textit{Regular}}
+   \end{subfigure}
+   \begin{subfigure}[t]{0.24\textwidth}
+     \centering
+     <<echo=F>>=
+     par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0.8))
+     hist(cat1.scheme4.5.taxa.m2a.mles[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+     axis(1,cex.axis=3,padj=1)
+     par(mar=c(4.5,1.5,2.8,3))
+     hist(cat1.scheme4.5.taxa.m2a.mles[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+     axis(1,cex.axis=3,padj=1)
+     @
+   \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mar=c(4.5,1.5,2.8,3))
+    hist(cat1.scheme4.5.taxa.m2a.mles[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+   \begin{subfigure}[t]{0.24\textwidth}
+     \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0.8))
+    hist(cat1.scheme4.5.taxa.m2a.bs.4.mles[,8],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,3))
+    hist(cat1.scheme4.5.taxa.m2a.bs.4.mles[,10],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mar=c(4.5,1.5,2.8,1))
+    hist(cat1.scheme4.5.taxa.m2a.bs.4.mles[,9],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \par\bigskip
+  \begin{subfigure}[t]{.01\textwidth}
+    \vspace{12 mm}
+    \rotatebox{90}{\textit{Irregular}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0.8))
+    hist(cat1.scheme1.5.taxa.m2a.mles[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,3))
+    hist(cat1.scheme1.5.taxa.m2a.mles[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mar=c(4.5,1.5,2.8,3))
+    hist(cat1.scheme1.5.taxa.m2a.mles[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0.8))
+    hist(cat1.scheme1.5.taxa.m2a.bs.86.mles[,8],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,3))
+    hist(cat1.scheme1.5.taxa.m2a.bs.86.mles[,10],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=FALSE,fig.align="center">>=
+    par(mar=c(4.5,1.5,2.8,1))
+    hist(cat1.scheme1.5.taxa.m2a.bs.86.mles[,9],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+  \end{subfigure}
+  \caption{MLE distributions of the $p_{\omega<1}$, $\omega_{<1}$, $p_{\omega=1}$ and $\omega_1$ parameters under M2a.  Histograms are over 100 simulated and bootstrap datasets with the bootstrap datasets generated by sampling from one simulated dataset.  Data were simulated under \textit{regular} and \textit{irregular} conditions.\\ \\\textit{regular} simulation conditions: 5 taxa, $45\%$ $\omega=0$, $45\%$ $\omega=0.5$, and $10\%$ $\omega=5$\\ \textit{irregular} simulation conditions: 5 taxa, $100\%$ $\omega=1$}
+  \label{fig:mle_p0_p1_w0_hists}
+\end{figure}
+
+\clearpage
+
+<<mles_more_bs,echo=F>>=
+## over more bootstraps (10,000) for a single simulation dataset
+cat1.scheme1.5.taxa.m2a.bs.10.more.mles <- read.csv('./data/cat1_scheme1_5_taxa_bs_10_m2a_mles_more_bs_difficult.csv',header=F)
+##cat1.scheme1.5.taxa.m2a.bs.10.more.mles <- cat1.scheme1.5.taxa.m2a.bs.10.more.mles[-which(cat1.scheme1.5.taxa.m2a.bs.10.more.mles[,11] > 15),]
+
+cat1.scheme1.5.taxa.m2a.bs.10.more.mles[,11][cat1.scheme1.5.taxa.m2a.bs.10.more.mles[,11]>10] <- 10
+cat1.scheme1.5.taxa.m8.bs.70.mles <- read.csv('./data/cat1_scheme1_bs_70_m8_mles_difficult.csv',header=F)
+@
+
+<<hists-cat1-scheme1-more-bs, fig.scap='MLE distributions over 10,000 bootstrap datasets under \\textit{difficult} conditions', fig.cap='Distributions of the $p_{\\omega>1}$ and $\\omega_{>1}$ parameters associated with positive selection estimated under models M2a and M8.  Histograms are over 10,000 bootstrap datasets drawn from a dataset simulated under \\textit{difficult} conditions (5 taxa, $100\\%$ $\\omega=1$).  Under M2a 1000 of the $\\omega_{>1}$ values estimated to be biologically unreasonable were capped at 10.', fig.subcap=c('M2a', 'M8'), out.width='.485\\linewidth', echo=FALSE>>=
+par(mfrow=c(1,2))
+hist(cat1.scheme1.5.taxa.m2a.bs.10.more.mles[,9],xlim=c(0,1),main='',xlab=expression(p[omega>1]),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+hist(cat1.scheme1.5.taxa.m2a.bs.10.more.mles[,11],main='',xlab=expression(omega['>1']),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+par(mfrow=c(1,2))
+hist(1-cat1.scheme1.5.taxa.m8.bs.70.mles[,8],xlim=c(0,1),main='',xlab=expression(p[omega>1]),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+hist(cat1.scheme1.5.taxa.m8.bs.70.mles[,11],main='',xlab=expression(omega['>1']),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+@
+
+\clearpage
+
+<<before-after-smoothing,fig.scap='MLEs before and after smoothing', fig.cap='MLEs of the $p_{\\omega<1}$ and $p_{\\omega=1}$ parameters under model M2a before and after smoothing using a uniform kernel with different bandwidth parameters.  The parameters were estimated over 100 bootstrap samples under \\textit{irregular} simulation conditions (5 taxa, $100\\%$ sites $\\omega=1$).',echo=F>>=
+ps.no.smooth <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_nosmooth.csv',header=F,sep=' ')
+ps.h.1.1 <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_h_.1_.1.csv',header=F,sep=' ')
+ps.h.2.2 <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_h_.2_.2.csv',header=F,sep=' ')
+ps.h.3.3 <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_h_.3_.3.csv',header=F,sep=' ')
+ps.h.4.4 <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_h_.4_.4.csv',header=F,sep=' ')
+ps.h.5.5 <- read.csv('./data/cat1_scheme1_5_taxa_m2a_bs_ds_p0_p1_h_.5_.5.csv',header=F,sep=' ')
+ps<-data.frame(p0=c(ps.no.smooth[,1],ps.h.1.1[,1],ps.h.2.2[,1],ps.h.3.3[,1],ps.h.4.4[,1],ps.h.5.5[,1]),p1=c(ps.no.smooth[,2],ps.h.1.1[,2],ps.h.2.2[,2],ps.h.3.3[,2],ps.h.4.4[,2],ps.h.5.5[,2]),case=rep(c("Unsmoothed","h=0.1","h=0.2","h=0.3","h=0.4","h=0.5"),each=100))
+ps$case <- factor(ps$case,levels = c("Unsmoothed","h=0.1","h=0.2","h=0.3","h=0.4","h=0.5"))
+theme_set(theme_gray(base_size=18))
+sm.plot <- ggplot(ps,aes(p0,p1)) + stat_bin2d(bins=15) + facet_wrap(~case,ncol=2)
+sm.plot + theme(panel.grid.major=element_blank(),panel.grid.minor=element_blank(),panel.background=element_blank(),panel.margin=unit(2,"lines"),axis.line=element_line(colour="black")) +
+scale_fill_gradientn(colours=rainbow(5),guide="colorbar") + xlab(expression(p[omega<1])) + ylab(expression(p[omega==1]))
+@
+
+\clearpage
+
+\begin{figure}
+  \centering
+  <<echo=F>>=
+  cat1.scheme1.30.taxa.m2a.mles <- read.csv('./data/cat1_scheme1_30_taxa_m2a_mles.csv',header=F)
+  par(mfrow=c(1,2))
+  hist(cat1.scheme1.30.taxa.m2a.mles[,4],xlim=c(0,1),main='',xlab=expression(p[omega>1]),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+  hist(cat1.scheme1.30.taxa.m2a.mles[,7],main='',xlab=expression(omega['>1']),cex.axis=1.5,cex.lab=1.5,yaxt='n',ylab='',col='black',density=200)
+  @
+\caption{Distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters associated with positive selection and estimated under model M2a.  Histograms are over 100 simulated datasets simulated under \textit{difficult} conditions ($100\%$ $\omega=1$) and using a 30-taxon tree.}
+\label{fig:sim_M2a_diff_30_taxa}
+\end{figure}
+
+\clearpage
+
+<<echo=F,warning=F>>=
+c1s3.m2a.mles  <- read.csv("./data/cat1_scheme3_5_taxa_m2a_mles.csv",header=F)
+c1s3.m8.mles   <- read.csv("./data/cat1_scheme3_5_taxa_m8_mles.csv",header=F)
+c1s4.m2a.mles  <- read.csv("./data/cat1_scheme4_5_taxa_m2a_mles.csv",header=F)
+c1s4.m8.mles   <- read.csv("./data/cat1_scheme4_5_taxa_m8_mles.csv",header=F)
+c2s7.m2a.mles  <- read.csv("./data/cat2_scheme7_5_taxa_m2a_mles.csv",header=F)
+c2s7.m8.mles   <- read.csv("./data/cat2_scheme7_5_taxa_m8_mles.csv",header=F)
+c2s8.m2a.mles  <- read.csv("./data/cat2_scheme8_5_taxa_m2a_mles.csv",header=F)
+c2s8.m8.mles   <- read.csv("./data/cat2_scheme8_5_taxa_m8_mles.csv",header=F)
+@
+
+\begin{figure}
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c1s3.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c1s3.m2a.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 3 - M2a}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c1s3.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c1s3.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 3 - M8}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c1s4.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c1s4.m2a.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 4 - M2a}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c1s4.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c1s4.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 4 - M8}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c2s7.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c2s7.m2a.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 7 - M2a}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c2s7.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c2s7.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 7 - M8}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c2s8.m2a.mles[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c2s8.m8.mles[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 8 - M2a}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(c2s8.m8.mles[,12],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(c2s8.m8.mles[,23],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{study 8 - M8}
+  \end{subfigure}
+  \caption{MLE distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters under models M2a and M8 for two different simulation scenarios: without model misspecification (\textit{Correct Model}, studies 3 and 4) and with mild model misspecification (\textit{Mild Misspecification}, studies 7 and 8).  The data were simulated using a 5-taxon tree topology.  In studies 3 and 7, $50\%$ of the sites were simulated under neutral evolution ($\omega=1$) and $50\%$ of the sites under positive selection ($\omega=1.5$).  In studies 4 and 8, $45\%$ of the sites were simulated under purifying selection ($\omega=0$), $45\%$ under neutral evolution ($\omega=1$) and $10\%$ under positive selection ($\omega=5$).}
+  \label{fig:s3478hists}
+\end{figure}
+
+\clearpage
+
+\begin{figure}[H]
+    \centering
+  \begin{subfigure}[t]{.49\textwidth}
+    \centering
+    \hspace{10 mm} \small{$50\%$ $\omega=1$, $50\%$ $\omega=1.5$}
+  \end{subfigure}
+  \begin{subfigure}[t]{.49\textwidth}
+    \centering
+    \hspace{10 mm} \small{$45\%$ $\omega=0$, $45\%$ $\omega=1$, $10\%$ $\omega=5$}
+  \end{subfigure}
+  \\[-2.6ex]
+  \begin{subfigure}[t]{.03\textwidth}
+    \vspace{8 mm}
+    \rotatebox{90}{\textit{\small{Mild Misspecification}} \hspace{4 mm} \textit{\small{Correct Model}}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.475\textwidth}
+    \centering
+    <<echo=F,warning=F>>=
+
+    c1s3.ft.fp     <- scan("./data/c1s3_opt_fp.csv",sep=',')
+    c1s3.ft.tp     <- scan("./data/c1s3_opt_tp.csv",sep=',')
+
+    c1s3m2a.beb.fp <- scan("./data/c1s3_m2a_beb_lrt_fp.csv",sep=',')
+    c1s3m2a.neb.fp <- scan("./data/c1s3_m2a_neb_lrt_fp.csv",sep=',')
+    c1s3m2a.sba.fp <- scan("./data/c1s3_m2a_sba_lrt_fp.csv",sep=',')
+    c1s3m2a.beb.tp <- scan("./data/c1s3_m2a_beb_lrt_tp.csv",sep=',')
+    c1s3m2a.neb.tp <- scan("./data/c1s3_m2a_neb_lrt_tp.csv",sep=',')
+    c1s3m2a.sba.tp <- scan("./data/c1s3_m2a_sba_lrt_tp.csv",sep=',')
+
+    c1s3m8.beb.fp  <- scan("./data/c1s3_m8_beb_lrt_fp.csv",sep=',')
+    c1s3m8.neb.fp  <- scan("./data/c1s3_m8_neb_lrt_fp.csv",sep=',')
+    c1s3m8.sba.fp  <- scan("./data/c1s3_m8_sba_lrt_fp.csv",sep=',')
+    c1s3m8.beb.tp  <- scan("./data/c1s3_m8_beb_lrt_tp.csv",sep=',')
+    c1s3m8.neb.tp  <- scan("./data/c1s3_m8_neb_lrt_tp.csv",sep=',')
+    c1s3m8.sba.tp  <- scan("./data/c1s3_m8_sba_lrt_tp.csv",sep=',')
+
+    c2s7.ft.fp     <- scan("./data/c2s7_opt_fp.csv",sep=',')
+    c2s7.ft.tp     <- scan("./data/c2s7_opt_tp.csv",sep=',')
+
+    c2s7m2a.beb.fp <- scan("./data/c2s7_m2a_beb_lrt_fp.csv",sep=',')
+    c2s7m2a.neb.fp <- scan("./data/c2s7_m2a_neb_lrt_fp.csv",sep=',')
+    c2s7m2a.sba.fp <- scan("./data/c2s7_m2a_sba_lrt_fp.csv",sep=',')
+    c2s7m2a.beb.tp <- scan("./data/c2s7_m2a_beb_lrt_tp.csv",sep=',')
+    c2s7m2a.neb.tp <- scan("./data/c2s7_m2a_neb_lrt_tp.csv",sep=',')
+    c2s7m2a.sba.tp <- scan("./data/c2s7_m2a_sba_lrt_tp.csv",sep=',')
+
+    c2s7m8.beb.fp  <- scan("./data/c2s7_m8_beb_lrt_fp.csv",sep=',')
+    c2s7m8.neb.fp  <- scan("./data/c2s7_m8_neb_lrt_fp.csv",sep=',')
+    c2s7m8.sba.fp  <- scan("./data/c2s7_m8_sba_lrt_fp.csv",sep=',')
+    c2s7m8.beb.tp  <- scan("./data/c2s7_m8_beb_lrt_tp.csv",sep=',')
+    c2s7m8.neb.tp  <- scan("./data/c2s7_m8_neb_lrt_tp.csv",sep=',')
+    c2s7m8.sba.tp  <- scan("./data/c2s7_m8_sba_lrt_tp.csv",sep=',')
+
+    thin <- floor(seq(1,length(c1s3.ft.fp),length=(length(c1s3.ft.fp)-1)/100))
+
+    fp <- c(c1s3.ft.fp[thin],c1s3m2a.neb.fp[thin],c1s3m2a.sba.fp[thin],c1s3m2a.beb.fp[thin])
+    fp <- c(fp,c1s3.ft.fp[thin],c1s3m8.neb.fp[thin],c1s3m8.sba.fp[thin],c1s3m8.beb.fp[thin])
+    fp <- c(fp,c2s7.ft.fp[thin],c2s7m2a.neb.fp[thin],c2s7m2a.sba.fp[thin],c2s7m2a.beb.fp[thin])
+    fp <- c(fp,c2s7.ft.fp[thin],c2s7m8.neb.fp[thin],c2s7m8.sba.fp[thin],c2s7m8.beb.fp[thin])
+
+    tp <- c(c1s3.ft.tp[thin],c1s3m2a.neb.tp[thin],c1s3m2a.sba.tp[thin],c1s3m2a.beb.tp[thin])
+    tp <- c(tp,c1s3.ft.tp[thin],c1s3m8.neb.tp[thin],c1s3m8.sba.tp[thin],c1s3m8.beb.tp[thin])
+    tp <- c(tp,c2s7.ft.tp[thin],c2s7m2a.neb.tp[thin],c2s7m2a.sba.tp[thin],c2s7m2a.beb.tp[thin])
+    tp <- c(tp,c2s7.ft.tp[thin],c2s7m8.neb.tp[thin],c2s7m8.sba.tp[thin],c2s7m8.beb.tp[thin])
+
+    roc.data <- data.frame(fp,tp,
+                               Method=rep(c("OPT","NEB","SBA","BEB"),
+                                              each=length(thin),times=4),
+                               Study=rep(c('Study 3 - M2a',
+                                               'Study 3 - M8',
+                                               'Study 7 - M2a',
+                                               'Study 7 - M8'),
+                                             each=length(thin)*4),
+                               Scenario=rep(c('CM','MM'),
+                                                each=length(thin)*8))
+
+    roc.plot <- ggplot(roc.data,aes(fp,tp)) +
+        coord_cartesian(xlim=c(-0.005,.405), ylim=c(-0.005,.405)) +
+        labs(x="False Positive Rate",y="True Positive Rate") +
+        geom_line(aes(color=Method,linetype=Method),size=1.2) +
+        geom_abline(slope=1,intercept=0,color='gray60') +
+        scale_color_manual(values=c("gray30","grey40","grey50","black")) +
+        scale_linetype_manual(values=c("dotted","dotdash","dashed","solid")) +
+        scale_x_continuous(breaks=c(0.1,0.2,0.3)) +
+        facet_wrap(~Study,ncol=2)
+
+    roc.plot +
+            theme(panel.margin=unit(0,"lines"),
+                  panel.background=element_blank(),
+                  strip.background=element_blank(),
+                  panel.grid.major=element_line(color="gray95"),
+                  legend.position="none",
+                  axis.line=element_line(colour="black"),
+                  text=element_text(size=20),
+                  panel.border = element_rect(colour = "black", fill=NA, size=1))
+@
+    \label{sfig:roc_hard_lrt}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    <<echo=F,warning=F>>=
+
+    c1s4.ft.fp     <- scan("./data/c1s4_opt_fp.csv",sep=',')
+    c1s4.ft.tp     <- scan("./data/c1s4_opt_tp.csv",sep=',')
+
+    c1s4m2a.beb.fp <- scan("./data/c1s4_m2a_beb_lrt_fp.csv",sep=',')
+    c1s4m2a.neb.fp <- scan("./data/c1s4_m2a_neb_lrt_fp.csv",sep=',')
+    c1s4m2a.sba.fp <- scan("./data/c1s4_m2a_sba_lrt_fp.csv",sep=',')
+    c1s4m2a.beb.tp <- scan("./data/c1s4_m2a_beb_lrt_tp.csv",sep=',')
+    c1s4m2a.neb.tp <- scan("./data/c1s4_m2a_neb_lrt_tp.csv",sep=',')
+    c1s4m2a.sba.tp <- scan("./data/c1s4_m2a_sba_lrt_tp.csv",sep=',')
+
+    c1s4m8.beb.fp <-  scan("./data/c1s4_m8_beb_lrt_fp.csv",sep=',')
+    c1s4m8.neb.fp <-  scan("./data/c1s4_m8_neb_lrt_fp.csv",sep=',')
+    c1s4m8.sba.fp <-  scan("./data/c1s4_m8_sba_lrt_fp.csv",sep=',')
+    c1s4m8.beb.tp <-  scan("./data/c1s4_m8_beb_lrt_tp.csv",sep=',')
+    c1s4m8.neb.tp <-  scan("./data/c1s4_m8_neb_lrt_tp.csv",sep=',')
+    c1s4m8.sba.tp <-  scan("./data/c1s4_m8_sba_lrt_tp.csv",sep=',')
+
+    c2s8.ft.fp  <-    scan("./data/c2s8_opt_fp.csv",sep=',')
+    c2s8.ft.tp  <-    scan("./data/c2s8_opt_tp.csv",sep=',')
+
+    c2s8m2a.beb.fp <- scan("./data/c2s8_m2a_beb_lrt_fp.csv",sep=',')
+    c2s8m2a.neb.fp <- scan("./data/c2s8_m2a_neb_lrt_fp.csv",sep=',')
+    c2s8m2a.sba.fp <- scan("./data/c2s8_m2a_sba_lrt_fp.csv",sep=',')
+    c2s8m2a.beb.tp <- scan("./data/c2s8_m2a_beb_lrt_tp.csv",sep=',')
+    c2s8m2a.neb.tp <- scan("./data/c2s8_m2a_neb_lrt_tp.csv",sep=',')
+    c2s8m2a.sba.tp <- scan("./data/c2s8_m2a_sba_lrt_tp.csv",sep=',')
+
+    c2s8m8.beb.fp <-  scan("./data/c2s8_m8_beb_lrt_fp.csv",sep=',')
+    c2s8m8.neb.fp <-  scan("./data/c2s8_m8_neb_lrt_fp.csv",sep=',')
+    c2s8m8.sba.fp <-  scan("./data/c2s8_m8_sba_lrt_fp.csv",sep=',')
+    c2s8m8.beb.tp <-  scan("./data/c2s8_m8_beb_lrt_tp.csv",sep=',')
+    c2s8m8.neb.tp <-  scan("./data/c2s8_m8_neb_lrt_tp.csv",sep=',')
+    c2s8m8.sba.tp <-  scan("./data/c2s8_m8_sba_lrt_tp.csv",sep=',')
+
+    thin <- floor(seq(1,length(c1s4.ft.fp),length=(length(c1s4.ft.fp)-1)/100))
+
+    fp <- c(c1s4.ft.fp[thin],c1s4m2a.neb.fp[thin],c1s4m2a.sba.fp[thin],c1s4m2a.beb.fp[thin])
+    fp <- c(fp,c1s4.ft.fp[thin],c1s4m8.neb.fp[thin],c1s4m8.sba.fp[thin],c1s4m8.beb.fp[thin])
+    fp <- c(fp,c2s8.ft.fp[thin],c2s8m2a.neb.fp[thin],c2s8m2a.sba.fp[thin],c2s8m2a.beb.fp[thin])
+    fp <- c(fp,c2s8.ft.fp[thin],c2s8m8.neb.fp[thin],c2s8m8.sba.fp[thin],c2s8m8.beb.fp[thin])
+
+    tp <- c(c1s4.ft.tp[thin],c1s4m2a.neb.tp[thin],c1s4m2a.sba.tp[thin],c1s4m2a.beb.tp[thin])
+    tp <- c(tp,c1s4.ft.tp[thin],c1s4m8.neb.tp[thin],c1s4m8.sba.tp[thin],c1s4m8.beb.tp[thin])
+    tp <- c(tp,c2s8.ft.tp[thin],c2s8m2a.neb.tp[thin],c2s8m2a.sba.tp[thin],c2s8m2a.beb.tp[thin])
+    tp <- c(tp,c2s8.ft.tp[thin],c2s8m8.neb.tp[thin],c2s8m8.sba.tp[thin],c2s8m8.beb.tp[thin])
+
+
+    roc.data <- data.frame(fp,tp,
+                               Method=rep(c("OPT","NEB","SBA","BEB"),
+                                              each=length(thin),times=4),
+                               Study=rep(c('Study 4 - M2a',
+                                               'Study 4 - M8',
+                                               'Study 8 - M2a',
+                                               'Study 8 - M8'),
+                                             each=length(thin)*4),
+                               Scenario=rep(c('CM','MM'),
+                                                each=length(thin)*8))
+
+    roc.plot <- ggplot(roc.data,aes(fp,tp)) +
+        coord_cartesian(xlim=c(-0.005,.1),ylim=c(-0.005,.805)) +
+        labs(x="False Positive Rate",y="True Positive Rate") +
+        geom_line(aes(color=Method,linetype=Method),size=1.2) +
+        geom_abline(slope=1,intercept=0,color='gray60') +
+        scale_shape_manual(values=c(15,18,17,16)) +
+        scale_color_manual(values=c("gray30","grey40","grey50","black")) +
+        scale_linetype_manual(values=c("dotted","dotdash","dashed","solid")) +
+        scale_x_continuous(breaks=c(0.02,0.04,0.06,0.08)) +
+        guides(colour = guide_legend(override.aes = list(size=1.4))) +
+        facet_wrap(~Study,ncol=2)
+
+    roc.plot +
+        theme(panel.background=element_blank(),
+              strip.background=element_blank(),
+              panel.grid.major=element_line(colour="gray95"),
+              panel.margin=unit(0,"lines"),
+              axis.line=element_line(colour="black"),
+              legend.title=element_blank(),
+              legend.key=element_rect(fill="transparent"),
+              legend.position=c(.84,.80),
+              legend.key.width=unit(6,"line"),
+              text=element_text(size=20),
+              panel.border = element_rect(colour = "black", fill=NA, size=1))
+@
+    \label{sfig:roc_easy_lrt}
+  \end{subfigure}
+  \caption[ROC Curves after LRT.]{ROC curves for the detection of sites under positive selection for BEB, NEB, and SBA analyses of data generated under two different simulation scenarios: without model misspecification (\textit{Correct Model}, studies 3 and 4) and with mild model misspecification (\textit{Mild Misspecification}, studies 7 and 8).  Likelihood ratio tests were performed prior to site-wise analyses.  The data were simulated using a 5-taxon tree topology.  In studies 3 and 7, $50\%$ of the sites were simulated under neutral evolution ($\omega=1$) and $50\%$ of the sites under positive selection ($\omega=1.5$).  In studies 4 and 8, $45\%$ of the sites were simulated under purifying selection ($\omega=0$), $45\%$ under neutral evolution ($\omega=1$) and $10\%$ under positive selection ($\omega=5$).  Each plot includes a line for the lower bound (y=x) and an expected upper bound (OPT) when classification is made using the generating model parameters. The curves for studies 4 and 8 and study 7 under M8 are identical to those without pre-screening because the null hypotheses of likelihood ratio tests were rejected for all simulated datasets.  The curves for NEB do not always cover the whole range of false positive rates, because NEB sometimes estimates the $\omega$ distribution with all mass on $\omega > 1$.  In these cases, even with a posterior probability cut-off of 1, NEB still incorrectly classifies sites to be under positive selection.}
+  \label{fig:roc_lrt}
+\end{figure}
+
+\clearpage
+
+<<real_data_mles,echo=F>>=
+bglobin.m2a.params <- read.csv("./real_data_results/mles/bglobin_m2a_mles.csv",header=F)
+ccmF.m2a.params <- read.csv("./real_data_results/mles/ccmF_m2a_mles.csv",header=F)
+CDH3.m2a.params <- read.csv("./real_data_results/mles/CDH3_m2a_mles.csv",header=F)
+enam.m2a.params <- read.csv("./real_data_results/mles/enam_m2a_mles.csv",header=F)
+HIVEnv.m2a.params <- read.csv("./real_data_results/mles/HIVEnv_m2a_mles.csv",header=F)
+HIVpol.m2a.params <- read.csv("./real_data_results/mles/HIVpol_m2a_mles.csv",header=F)
+HIVvif.m2a.params <- read.csv("./real_data_results/mles/HIVvif_m2a_mles.csv",header=F)
+lysin.m2a.params <- read.csv("./real_data_results/mles/lysin_m2a_mles.csv",header=F)
+mivN.m2a.params <- read.csv("./real_data_results/mles/mivN_m2a_mles.csv",header=F)
+nuoL3.m2a.params <- read.csv("./real_data_results/mles/nuoL3_m2a_mles.csv",header=F)
+perM.m2a.params <- read.csv("./real_data_results/mles/perM_m2a_mles.csv",header=F)
+pgpA.m2a.params <- read.csv("./real_data_results/mles/pgpA_m2a_mles.csv",header=F)
+RfaL.m2a.params <- read.csv("./real_data_results/mles/RfaL_m2a_mles.csv",header=F)
+tax.m2a.params <- read.csv("./real_data_results/mles/tax_m2a_mles.csv",header=F)
+TrbLVirB62.m2a.params <- read.csv("./real_data_results/mles/TrbL-VirB6_2_m2a_mles.csv",header=F)
+TrbLVirB63.m2a.params <- read.csv("./real_data_results/mles/TrbL-VirB6_3_m2a_mles.csv",header=F)
+bglobin.m8.params <- read.csv("./real_data_results/mles/bglobin_m8_mles.csv",header=F)
+ccmF.m8.params <- read.csv("./real_data_results/mles/ccmF_m8_mles.csv",header=F)
+CDH3.m8.params <- read.csv("./real_data_results/mles/CDH3_m8_mles.csv",header=F)
+enam.m8.params <- read.csv("./real_data_results/mles/enam_m8_mles.csv",header=F)
+HIVEnv.m8.params <- read.csv("./real_data_results/mles/HIVEnv_m8_mles.csv",header=F)
+HIVpol.m8.params <- read.csv("./real_data_results/mles/HIVpol_m8_mles.csv",header=F)
+HIVvif.m8.params <- read.csv("./real_data_results/mles/HIVvif_m8_mles.csv",header=F)
+lysin.m8.params <- read.csv("./real_data_results/mles/lysin_m8_mles.csv",header=F)
+mivN.m8.params <- read.csv("./real_data_results/mles/mivN_m8_mles.csv",header=F)
+nuoL3.m8.params <- read.csv("./real_data_results/mles/nuoL3_m8_mles.csv",header=F)
+perM.m8.params <- read.csv("./real_data_results/mles/perM_m8_mles.csv",header=F)
+pgpA.m8.params <- read.csv("./real_data_results/mles/pgpA_m8_mles.csv",header=F)
+RfaL.m8.params <- read.csv("./real_data_results/mles/RfaL_m8_mles.csv",header=F)
+tax.m8.params <- read.csv("./real_data_results/mles/tax_m8_mles.csv",header=F)
+TrbLVirB62.m8.params <- read.csv("./real_data_results/mles/TrbL-VirB6_2_m8_mles.csv",header=F)
+TrbLVirB63.m8.params <- read.csv("./real_data_results/mles/TrbL-VirB6_3_m8_mles.csv",header=F)
+@
+
+
+\begin{figure}
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(bglobin.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(bglobin.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{$\beta$-globin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(ccmF.m2a.params[,2],main=expression(p[omega==1]),xlim=c(0,1),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(ccmF.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ccmF}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(CDH3.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{CDH3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(enam.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(enam.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ENAM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVEnv.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVEnv.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{env}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVpol.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVpol.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pol}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVvif.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVvif.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{vif}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(lysin.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(lysin.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{lysin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(mivN.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(mivN.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{mivN}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(nuoL3.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(nuoL3.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{nuoL3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(perM.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(perM.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{perM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(pgpA.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(pgpA.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pgpA}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(RfaL.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(RfaL.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{RfaL}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(tax.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(tax.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{tax}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB62.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB62.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_2}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB63.m2a.params[,2],xlim=c(0,1),main=expression(p[omega<1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB63.m2a.params[,5],main=expression(omega['<1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_3}}
+  \end{subfigure}
+  \caption{Distributions of the $p_{\omega<1}$ and $\omega_{<1}$ parameters for the real data under model M2a.  Histograms are over 100 bootstrap datasets.}
+  \label{fig:real_genes_m2a_p0_w0_mles}
+\end{figure}
+
+\clearpage
+
+\begin{figure}
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(bglobin.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{$\beta$-globin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(ccmF.m2a.params[,3],main=expression(p[omega==1]),xlim=c(0,1),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ccmF}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(CDH3.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{CDH3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(enam.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ENAM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(HIVEnv.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{env}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(HIVpol.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pol}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(HIVvif.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{vif}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(lysin.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{lysin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(mivN.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{mivN}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(nuoL3.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{nuoL3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(perM.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{perM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(pgpA.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pgpA}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(RfaL.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{RfaL}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(tax.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{tax}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(TrbLVirB62.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_2}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mar=c(4.5,1.5,2.8,0.4))
+    hist(TrbLVirB63.m2a.params[,3],xlim=c(0,1),main=expression(p[omega==1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_3}}
+  \end{subfigure}
+  \caption{Distributions of the $p_{\omega=1}$ parameters for the real data under model M2a.  Histograms are over 100 bootstrap datasets.}
+  \label{fig:real_genes_m2a_p1_mles}
+\end{figure}
+
+\clearpage
+
+\begin{figure}
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(bglobin.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(bglobin.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{$\beta$-globin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(ccmF.m2a.params[,4],main=expression(p[omega>1]),xlim=c(0,1),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(ccmF.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ccmF}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(CDH3.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{CDH3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(enam.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(enam.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ENAM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVEnv.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVEnv.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{env}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVpol.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVpol.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pol}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVvif.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVvif.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{vif}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(lysin.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(lysin.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{lysin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(mivN.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(mivN.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{mivN}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(nuoL3.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(nuoL3.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{nuoL3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(perM.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(perM.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{perM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(pgpA.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(pgpA.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pgpA}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(RfaL.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(RfaL.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{RfaL}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(tax.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(tax.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{tax}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB62.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB62.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_2}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB63.m2a.params[,4],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB63.m2a.params[,7],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_3}}
+  \end{subfigure}
+  \caption{Distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters for the real data under model M2a.  Histograms are over 100 bootstrap datasets.}
+  \label{fig:real_genes_m2a_mles}
+\end{figure}
+
+\clearpage
+
+\begin{figure}
+  \centering
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(bglobin.m8.params[,ncol(bglobin.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(bglobin.m8.params[,ncol(bglobin.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{$\beta$-globin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(ccmF.m8.params[,ncol(ccmF.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(ccmF.m8.params[,ncol(ccmF.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ccmF}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(CDH3.m8.params[,ncol(CDH3.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(CDH3.m8.params[,ncol(CDH3.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{CDH3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(enam.m8.params[,ncol(enam.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(enam.m8.params[,ncol(enam.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{ENAM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVEnv.m8.params[,ncol(HIVEnv.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVEnv.m8.params[,ncol(HIVEnv.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{env}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVpol.m8.params[,ncol(HIVpol.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVpol.m8.params[,ncol(HIVpol.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pol}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(HIVvif.m8.params[,ncol(HIVvif.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(HIVvif.m8.params[,ncol(HIVvif.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{vif}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(lysin.m8.params[,ncol(lysin.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(lysin.m8.params[,ncol(lysin.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{lysin}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(mivN.m8.params[,ncol(mivN.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(mivN.m8.params[,ncol(mivN.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{mivN}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(nuoL3.m8.params[,ncol(nuoL3.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(nuoL3.m8.params[,ncol(nuoL3.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{nuoL3}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(perM.m8.params[,ncol(perM.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(perM.m8.params[,ncol(perM.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{perM}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(pgpA.m8.params[,ncol(pgpA.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(pgpA.m8.params[,ncol(pgpA.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{pgpA}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(RfaL.m8.params[,ncol(RfaL.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(RfaL.m8.params[,ncol(RfaL.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{RfaL}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(tax.m8.params[,ncol(tax.m8.params)-11],xlim=c(0,1),breaks=seq(0,1,.1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(tax.m8.params[,ncol(tax.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{tax}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB62.m8.params[,ncol(TrbLVirB62.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB62.m8.params[,ncol(TrbLVirB62.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_2}}
+  \end{subfigure}
+  \begin{subfigure}[t]{0.24\textwidth}
+    \centering
+    <<echo=F>>=
+    par(mfrow=c(1,2),mar=c(4.5,1.5,2.8,0))
+    hist(TrbLVirB63.m8.params[,ncol(TrbLVirB63.m8.params)-11],xlim=c(0,1),main=expression(p[omega>1]),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    par(mar=c(4.5,1.5,2.8,4))
+    hist(TrbLVirB63.m8.params[,ncol(TrbLVirB63.m8.params)],main=expression(omega['>1']),cex.main=4,xlab='',axes=F,ylab='',col='black',density=200)
+    axis(1,cex.axis=3,padj=1)
+    @
+    \caption{\textit{TrbL-VirB6\_3}}
+  \end{subfigure}
+  \caption{Distributions of the $p_{\omega>1}$ and $\omega_{>1}$ parameters for the real data under model M8.  Histograms are over 100 bootstrap datasets.}
+  \label{fig:real_genes_m8_mles}
+\end{figure}
+
+\clearpage
+
+% References
+\noindent{\bf References}
+\singlespacing
+\begin{description}
+\item \footnotesize{Neyman J, Pearson ES. 1933.  On the Problem of the Most Efficient Tests of Statistical Hypotheses.  \emph{Phil Trans Royal Soc A}. 231:289-337.}
+\item \footnotesize{Zhang J, Nielsen R, and Yang Z.  2005. Evaluation of an improved branch-site likelihood method for detecting positive selection at the molecular level. \emph{Mol Biol Evol} 22:2472-2479.}
+\item \footnotesize{Baker JL, Dunn KA, Mingrone J, Wood BA, Karpinski BA, Sherwood CC, Wildman DE, Maynard TM, Bielawski JP. 2016.  Functional Divergence of the Nuclear Receptor \textit{NR2C1} as a Modulator of Pluripotentiality During Hominid Evolution. \emph{Genetics}.  203(2):905-22.}
+\end{description}
+
+\end{document}
